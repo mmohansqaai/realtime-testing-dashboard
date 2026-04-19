@@ -13,8 +13,9 @@ services:
         fromDatabase:
           name: realtime-testing-dashboard-db
           property: connectionString
+      # Comma-separated. Each Vercel project / preview URL must be listed (browsers send exact Origin).
       - key: CORS_ORIGINS
-        value: https://realtime-testing-dashboard.vercel.app
+        value: https://realtime-testing-dashboard.vercel.app,https://realtime-testing-dashboard-ooka.vercel.app
       - key: AUTO_CREATE_SCHEMA
         value: "false"
 databases:

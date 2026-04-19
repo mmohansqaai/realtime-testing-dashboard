@@ -94,12 +94,12 @@ function reportViewerUrl(run: {
 async function fetchJson<T>(path: string): Promise<T> {
   const url = apiUrl(path)
   const sep = url.includes('?') ? '&' : '?'
+  // Avoid Cache-Control/Pragma here — they trigger a CORS preflight on cross-origin fetches; the
+  // `cache: 'no-store'` option and `?_=` bust are enough for the dashboard.
   const response = await fetch(`${url}${sep}_=${Date.now()}`, {
     cache: 'no-store',
     headers: {
       Accept: 'application/json',
-      'Cache-Control': 'no-cache',
-      Pragma: 'no-cache',
     },
   })
   if (!response.ok) {
