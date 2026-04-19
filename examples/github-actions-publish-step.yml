@@ -6,7 +6,7 @@
   - name: Publish results to dashboard (metrics + HTML zip)
     if: always()   # optional: run even when tests fail, if playwright-report exists
     env:
-      DASHBOARD_URL: https://realtime-testing-dashboard-api.onrender.com
+      DASHBOARD_URL: https://realtime-testing-dashboard-api-ld7t.onrender.com
       DASHBOARD_INGEST_TOKEN: ${{ secrets.DASHBOARD_INGEST_TOKEN }}
     run: |
       set -euo pipefail

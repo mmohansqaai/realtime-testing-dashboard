@@ -40,8 +40,8 @@ const pct = (value: number, total: number): number => {
   return Math.round((value / total) * 100)
 }
 
-/** Deployed Render API — not the Vercel static host. */
-const DEFAULT_PROD_API = 'https://realtime-testing-dashboard-api.onrender.com'
+/** Deployed Render API — must match the URL shown in Render (may include a suffix like `-abc1`). */
+const DEFAULT_PROD_API = 'https://realtime-testing-dashboard-api-ld7t.onrender.com'
 
 /**
  * Empty base ⇒ relative `/api/...` ⇒ hits the deploy host (vercel.app), not Render.
@@ -280,8 +280,8 @@ function App() {
           <div className="card-title">Connection error</div>
           <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{fetchError}</pre>
           <p className="meta">
-            API base in use: <strong>{getApiBaseUrl() || 'same-origin'}</strong>. On Vercel, the app targets{' '}
-            {DEFAULT_PROD_API} automatically; you can remove <code>VITE_API_BASE_URL</code>.
+            API base in use: <strong>{getApiBaseUrl() || 'same-origin'}</strong>. Without{' '}
+            <code>VITE_API_BASE_URL</code>, production uses <code>{DEFAULT_PROD_API}</code> (REST + WebSocket).
           </p>
           <button type="button" onClick={() => void loadSummary()}>
             Retry

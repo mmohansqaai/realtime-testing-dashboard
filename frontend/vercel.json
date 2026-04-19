@@ -5,7 +5,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://realtime-testing-dashboard-api.onrender.com/api/:path*"
+      "destination": "https://realtime-testing-dashboard-api-ld7t.onrender.com/api/:path*"
     }
   ]
 }
