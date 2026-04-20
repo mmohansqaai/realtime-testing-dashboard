@@ -58,6 +58,21 @@ function getApiBaseUrl(): string {
   if (import.meta.env.MODE === 'development') {
     return trimmed
   }
+  // On Vercel production, prefer same-origin /api via rewrite to avoid browser CORS dependency.
+  if (!trimmed) {
+    return ''
+  }
+  if (typeof window !== 'undefined' && trimmed === window.location.origin.replace(/\/$/, '')) {
+    return ''
+  }
+  return trimmed
+}
+
+function getWsBaseUrl(): string {
+  const trimmed = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
+  if (import.meta.env.MODE === 'development') {
+    return trimmed
+  }
   if (typeof window !== 'undefined' && trimmed && trimmed === window.location.origin.replace(/\/$/, '')) {
     return DEFAULT_PROD_API
   }
@@ -216,7 +231,7 @@ function App() {
     let socket: WebSocket | null = null
 
     const connect = () => {
-      const base = getApiBaseUrl()
+      const base = getWsBaseUrl()
       if (base) {
         const wsUrl = base.replace(/^http/, 'ws')
         socket = new WebSocket(`${wsUrl}/ws`)
@@ -321,7 +336,8 @@ function App() {
           <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{fetchError}</pre>
           <p className="meta">
             API base in use: <strong>{getApiBaseUrl() || 'same-origin'}</strong>. Without{' '}
-            <code>VITE_API_BASE_URL</code>, production uses <code>{DEFAULT_PROD_API}</code> (REST + WebSocket).
+            <code>VITE_API_BASE_URL</code>, production uses <code>same-origin /api</code> for REST (Vercel rewrite),
+            and <code>{DEFAULT_PROD_API}</code> for WebSocket.
           </p>
           <button type="button" onClick={() => void loadSummary()}>
             Retry
