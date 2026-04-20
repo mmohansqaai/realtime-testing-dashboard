@@ -42,6 +42,7 @@ const pct = (value: number, total: number): number => {
 
 /** Deployed Render API — must match the URL shown in Render (may include a suffix like `-abc1`). */
 const DEFAULT_PROD_API = 'https://realtime-testing-dashboard-api-ld7t.onrender.com'
+const FETCH_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS || 20000)
 
 /**
  * Empty base ⇒ relative `/api/...` ⇒ hits the deploy host (vercel.app), not Render.
@@ -94,14 +95,28 @@ function reportViewerUrl(run: {
 async function fetchJson<T>(path: string): Promise<T> {
   const url = apiUrl(path)
   const sep = url.includes('?') ? '&' : '?'
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
   // Avoid Cache-Control/Pragma here — they trigger a CORS preflight on cross-origin fetches; the
   // `cache: 'no-store'` option and `?_=` bust are enough for the dashboard.
-  const response = await fetch(`${url}${sep}_=${Date.now()}`, {
-    cache: 'no-store',
-    headers: {
-      Accept: 'application/json',
-    },
-  })
+  let response: Response
+  try {
+    response = await fetch(`${url}${sep}_=${Date.now()}`, {
+      cache: 'no-store',
+      signal: controller.signal,
+      headers: {
+        Accept: 'application/json',
+      },
+    })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    if ((e instanceof Error && e.name === 'AbortError') || msg.includes('aborted')) {
+      throw new Error(`Timed out after ${FETCH_TIMEOUT_MS}ms while loading ${url}. Render may still be waking up; click Retry.`)
+    }
+    throw new Error(`Network error while loading ${url}: ${msg}`)
+  } finally {
+    clearTimeout(timeoutId)
+  }
   if (!response.ok) {
     throw new Error(`${response.status} ${response.statusText} ${url}`)
   }
@@ -138,20 +153,23 @@ const createDemoPayload = () => {
 function App() {
   const [summary, setSummary] = useState<Summary | null>(null)
   const [fetchError, setFetchError] = useState<string | null>(null)
+  const [wsError, setWsError] = useState<string | null>(null)
   const [connectionStatus, setConnectionStatus] = useState('Connecting...')
   const reconnectTimerRef = useRef<number | null>(null)
   const [dataSource, setDataSource] = useState<string>('unknown')
   const [selectedReportRunId, setSelectedReportRunId] = useState<number | null>(null)
 
-  const loadSummary = useCallback(async () => {
+  const loadSummary = useCallback(async (): Promise<boolean> => {
     try {
       const data = await fetchJson<Summary>('/api/summary')
       setSummary(data)
       setFetchError(null)
+      return true
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       setFetchError(msg)
       console.error('[dashboard] /api/summary failed', msg)
+      return false
     }
   }, [])
 
@@ -165,8 +183,25 @@ function App() {
   }, [])
 
   useEffect(() => {
-    void loadSummary()
+    let cancelled = false
+    const run = async () => {
+      // Render free tier can cold-start; backoff avoids a permanent "Loading..." state.
+      const delays = [0, 1500, 3000, 6000, 12000]
+      for (let i = 0; i < delays.length; i += 1) {
+        if (cancelled) return
+        if (delays[i] > 0) {
+          await new Promise((resolve) => window.setTimeout(resolve, delays[i]))
+          if (cancelled) return
+        }
+        const ok = await loadSummary()
+        if (ok) return
+      }
+    }
+    void run()
     void loadConfig()
+    return () => {
+      cancelled = true
+    }
   }, [loadSummary, loadConfig])
 
   // If WebSocket cannot stay connected (common on free Render), still refresh summary periodically.
@@ -192,6 +227,7 @@ function App() {
 
       socket.onopen = () => {
         setConnectionStatus('Live')
+        setWsError(null)
         // Re-fetch so the UI matches GET /api/summary; do not trust WS `initial` alone (can race / disagree with REST).
         void loadSummary()
       }
@@ -203,6 +239,10 @@ function App() {
           return
         }
         setSummary(payload.summary)
+      }
+
+      socket.onerror = () => {
+        setWsError('Live WebSocket is unavailable (500/timeout). The dashboard continues with 15s polling.')
       }
 
       socket.onclose = () => {
@@ -304,6 +344,12 @@ function App() {
           <button type="button" onClick={() => void loadSummary()}>
             Retry now
           </button>
+        </section>
+      ) : null}
+      {wsError ? (
+        <section className="card" style={{ marginBottom: 16, borderColor: 'var(--warning, #a83)' }}>
+          <div className="card-title">Live channel degraded</div>
+          <p className="meta" style={{ marginBottom: 0 }}>{wsError}</p>
         </section>
       ) : null}
       <header>
