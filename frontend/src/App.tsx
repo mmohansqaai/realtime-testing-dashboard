@@ -43,6 +43,7 @@ const pct = (value: number, total: number): number => {
 /** Deployed Render API — must match the URL shown in Render (may include a suffix like `-abc1`). */
 const DEFAULT_PROD_API = 'https://realtime-testing-dashboard-api-ld7t.onrender.com'
 const FETCH_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS || 20000)
+const RENDER_FALLBACK_TIMEOUT_MS = Number(import.meta.env.VITE_RENDER_FALLBACK_TIMEOUT_MS || 45000)
 const ENABLE_WS =
   import.meta.env.MODE === 'development'
     ? true
@@ -84,6 +85,8 @@ const apiUrl = (path: string): string => {
   return `${base}${path}`
 }
 
+const renderApiUrl = (path: string): string => `${DEFAULT_PROD_API}${path}`
+
 /** Primary URL for viewing a run's HTML report (ZIP bundle, single-file, or external link). */
 function reportViewerUrl(run: {
   id: number
@@ -107,45 +110,58 @@ function reportViewerUrl(run: {
 }
 
 async function fetchJson<T>(path: string): Promise<T> {
-  const url = apiUrl(path)
-  const sep = url.includes('?') ? '&' : '?'
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
-  // Avoid Cache-Control/Pragma here — they trigger a CORS preflight on cross-origin fetches; the
-  // `cache: 'no-store'` option and `?_=` bust are enough for the dashboard.
-  let response: Response
-  try {
-    response = await fetch(`${url}${sep}_=${Date.now()}`, {
-      cache: 'no-store',
-      signal: controller.signal,
-      headers: {
-        Accept: 'application/json',
-      },
-    })
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    if ((e instanceof Error && e.name === 'AbortError') || msg.includes('aborted')) {
-      throw new Error(`Timed out after ${FETCH_TIMEOUT_MS}ms while loading ${url}. Render may still be waking up; click Retry.`)
+  const primary = apiUrl(path)
+  const shouldTryRenderFallback =
+    import.meta.env.MODE !== 'development' && !primary.startsWith('http')
+  const candidates: Array<{ url: string; timeoutMs: number }> = [{ url: primary, timeoutMs: FETCH_TIMEOUT_MS }]
+  if (shouldTryRenderFallback) {
+    candidates.push({ url: renderApiUrl(path), timeoutMs: RENDER_FALLBACK_TIMEOUT_MS })
+  }
+
+  let lastError = ''
+  for (const candidate of candidates) {
+    const url = candidate.url
+    const sep = url.includes('?') ? '&' : '?'
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), candidate.timeoutMs)
+    try {
+      const response = await fetch(`${url}${sep}_=${Date.now()}`, {
+        cache: 'no-store',
+        signal: controller.signal,
+        headers: {
+          Accept: 'application/json',
+        },
+      })
+      if (!response.ok) {
+        throw new Error(`${response.status} ${response.statusText} ${url}`)
+      }
+      const ct = response.headers.get('content-type') || ''
+      if (!ct.includes('application/json')) {
+        throw new Error(`Expected JSON from API, got ${ct || 'unknown type'} from ${url}`)
+      }
+      const data = (await response.json()) as T
+      if (path.includes('summary') && data && typeof data === 'object') {
+        const s = data as unknown as Summary
+        if (!s.totals || typeof s.totals.runs !== 'number') {
+          throw new Error(`Invalid /api/summary JSON from ${url}`)
+        }
+      }
+      return data
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      if ((e instanceof Error && e.name === 'AbortError') || msg.includes('aborted')) {
+        lastError = `Timed out after ${candidate.timeoutMs}ms while loading ${url}.`
+      } else {
+        lastError = `Network/API error while loading ${url}: ${msg}`
+      }
+    } finally {
+      clearTimeout(timeoutId)
     }
-    throw new Error(`Network error while loading ${url}: ${msg}`)
-  } finally {
-    clearTimeout(timeoutId)
   }
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText} ${url}`)
-  }
-  const ct = response.headers.get('content-type') || ''
-  if (!ct.includes('application/json')) {
-    throw new Error(`Expected JSON from API, got ${ct || 'unknown type'}. Check API base URL (must be Render), not the Vercel site. ${url}`)
-  }
-  const data = (await response.json()) as T
-  if (path.includes('summary') && data && typeof data === 'object') {
-    const s = data as unknown as Summary
-    if (!s.totals || typeof s.totals.runs !== 'number') {
-      throw new Error(`Invalid /api/summary JSON from ${url}`)
-    }
-  }
-  return data
+
+  throw new Error(
+    `${lastError} Render may still be waking up; click Retry.`,
+  )
 }
 
 const createDemoPayload = () => {
