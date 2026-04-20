@@ -43,6 +43,10 @@ const pct = (value: number, total: number): number => {
 /** Deployed Render API — must match the URL shown in Render (may include a suffix like `-abc1`). */
 const DEFAULT_PROD_API = 'https://realtime-testing-dashboard-api-ld7t.onrender.com'
 const FETCH_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS || 20000)
+const ENABLE_WS =
+  import.meta.env.MODE === 'development'
+    ? true
+    : String(import.meta.env.VITE_ENABLE_WS || '').toLowerCase() === '1'
 
 /**
  * Empty base ⇒ relative `/api/...` ⇒ hits the deploy host (vercel.app), not Render.
@@ -223,6 +227,11 @@ function App() {
   }, [loadSummary])
 
   useEffect(() => {
+    if (!ENABLE_WS) {
+      setConnectionStatus('Polling (WS disabled)')
+      setWsError(null)
+      return
+    }
     let socket: WebSocket | null = null
 
     const connect = () => {
