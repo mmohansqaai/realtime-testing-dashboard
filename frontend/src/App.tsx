@@ -58,14 +58,9 @@ function getApiBaseUrl(): string {
   if (import.meta.env.MODE === 'development') {
     return trimmed
   }
-  // On Vercel production, prefer same-origin /api via rewrite to avoid browser CORS dependency.
-  if (!trimmed) {
-    return ''
-  }
-  if (typeof window !== 'undefined' && trimmed === window.location.origin.replace(/\/$/, '')) {
-    return ''
-  }
-  return trimmed
+  // Hard rule for deployed UI: always use same-origin /api via Vercel rewrite.
+  // This avoids cross-origin CORS failures even if VITE_API_BASE_URL is set in Vercel.
+  return ''
 }
 
 function getWsBaseUrl(): string {
