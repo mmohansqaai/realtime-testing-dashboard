@@ -24,7 +24,9 @@ A real-time QA observability dashboard with a FastAPI backend and a React fronte
 - `scripts/seed_demo.py` - inserts sample data
 - `frontend/` - React dashboard client
 - `qa_dashboard.db` - SQLite database file
-- `render.yaml` - Render Blueprint for backend + Postgres
+- `render.yaml` - Render Blueprint for backend (DB: Neon or any Postgres URL in `DATABASE_URL`)
+- `.python-version` - Python **3.11.9** for [Render](https://render.com/docs/python-version) (avoids 3.14 default → `pydantic-core` Rust build failures)
+- `runtime.txt` - same version (kept for other hosts that still read it)
 
 ## Local development
 
@@ -99,19 +101,34 @@ Open `http://127.0.0.1:8000`.
 
 When `frontend/dist` exists, FastAPI serves the React app and asset bundle.
 
-## Deploy as SaaS (Free tier): Vercel + Render
+## Deploy as SaaS (Free tier): Vercel + Render (+ Neon Postgres)
 
-### A) Deploy backend and Postgres on Render
+### A) Postgres on Neon (recommended)
 
-1. Push this project to a Git provider (GitHub/GitLab/Bitbucket).
-2. In Render, create a new Blueprint deployment and point to this repo.
-3. Render will read `render.yaml` and create:
-   - `realtime-testing-dashboard-api` web service
-   - `realtime-testing-dashboard-db` Postgres database
-4. Update `CORS_ORIGINS` in Render after frontend deploy:
-   - `https://<your-project>.vercel.app`
+1. In [Neon Console](https://console.neon.tech), create a project (pick a region near your Render service).
+2. Open **Dashboard** → **Connection details**, copy the **connection string** (use the **pooled** URI if Neon offers it).
+3. Leave the string as `postgresql://` or `postgres://` — the app normalizes it for SQLAlchemy (see [`app/database.py`](app/database.py)).
 
-If Render shows **Deploy failed** during **Build** (exit code 1), open **Logs** for the failed deploy and fix the pip error first — a broken build means the API never runs reliably (curl/GitHub Actions will time out). This repo pins Python in [`runtime.txt`](runtime.txt) and in [`render.yaml`](render.yaml) (`PYTHON_VERSION`) so the build does not use **Python 3.14+** (missing wheels for `pydantic-core` → Rust/maturin build → fails on Render’s read-only filesystem).
+### B) Backend web service on Render
+
+1. Push this repo to GitHub/GitLab/Bitbucket.
+2. Render → **New** → **Blueprint** → select the repo branch.
+3. Render reads [`render.yaml`](render.yaml) and creates **`realtime-testing-dashboard-api`** (no Render Postgres).
+4. When prompted (or under **Environment**), set:
+   - **`PYTHON_VERSION`** — `3.11.9` (required if you use **New Web Service** instead of Blueprint — Render’s default for new services is **3.14.x**, which breaks this stack; see [Render: Python version](https://render.com/docs/python-version)).
+   - **`DATABASE_URL`** — paste the Neon connection string (must include TLS, e.g. `?sslmode=require` if Neon provides it).
+   - **`CORS_ORIGINS`** — comma-separated frontend origins; for Vercel use `https://<your-project>.vercel.app` (add preview URLs if you use them — browsers send the exact `Origin`).
+5. Deploy and wait for **Live**. Check: `https://<your-render-service>.onrender.com/api/health`
+
+The repo root includes [`.python-version`](.python-version) so Render installs **3.11.9** automatically on the **next** clone after you merge/push — but an already-created service won’t pick that up until you clear build cache or rely on **`PYTHON_VERSION`** above.
+
+Each deploy runs `alembic upgrade head` before Uvicorn starts, so the Neon schema stays in sync with [`migrations/`](migrations/).
+
+#### Optional Render-only Postgres (legacy)
+
+Older revisions of this repo shipped a **`databases:`** block in `render.yaml`. If you prefer managed Postgres **on Render** instead of Neon, remove `DATABASE_URL` from the Blueprint env, add a **`databases:`** entry named `realtime-testing-dashboard-db`, and set `DATABASE_URL` with `fromDatabase` as in Render’s Postgres docs — or create a Postgres instance in the dashboard and paste its **Internal** or **External** URL into `DATABASE_URL`.
+
+If Render shows **Deploy failed** during **Build** with **`pydantic-core`** / **`maturin`** / **read-only file system** errors, the service is using **Python 3.14+** without a prebuilt wheel. Fix: set **`PYTHON_VERSION`** to **`3.11.9`** (Render dashboard → **Environment**), or merge [`.python-version`](.python-version) and redeploy. Avoid relying on `runtime.txt` alone — [Render’s documented](https://render.com/docs/python-version) signals are **`PYTHON_VERSION`** and **`.python-version`**.
 
 Backend startup command runs migrations before boot:
 
@@ -119,7 +136,7 @@ Backend startup command runs migrations before boot:
 alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
 ```
 
-### B) Deploy frontend on Vercel
+### C) Deploy frontend on Vercel
 
 1. Import the `frontend/` directory as a Vercel project.
 2. Set environment variable in Vercel (optional if you use the committed default):
@@ -134,7 +151,7 @@ The frontend includes [`frontend/.env.production`](frontend/.env.production) so 
    - Build command: `npm run build`
    - Output directory: `dist`
 
-### C) Verify production deployment
+### D) Verify production deployment
 
 Run these checks after deploy:
 
@@ -218,7 +235,7 @@ Notes:
 - **HTTP 422 on `run-with-report` with `curl -F payload=@payload.json`:** `curl` sends `payload` as a **file part** (with a filename). The API reads multipart manually (see `X-Ingest-Api-Revision: 3` on success). If you still get **422**, the JSON failed **schema** validation—save the body: `curl ... -o err.json -w '%{http_code}'` and open `err.json` (lists missing/wrong fields). Do **not** rely on `curl: (22)` alone; it hides the response body.
 - **WebSocket “Reconnecting”** on Vercel: set `CORS_ORIGINS` to your exact Vercel URL (including `https://`). Redeploy the API after changing it.
 
-### D) Rollback and recovery
+### E) Rollback and recovery
 
 - Frontend rollback: redeploy a previous successful Vercel deployment.
 - Backend rollback: redeploy previous Render service revision.

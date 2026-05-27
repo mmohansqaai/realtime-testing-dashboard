@@ -41,7 +41,7 @@ const pct = (value: number, total: number): number => {
 }
 
 /** Deployed Render API — must match the URL shown in Render (may include a suffix like `-abc1`). */
-const DEFAULT_PROD_API = 'https://realtime-testing-dashboard-api-ld7t.onrender.com'
+const DEFAULT_PROD_API = 'https://realtime-testing-dashboard.onrender.com'
 const FETCH_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS || 20000)
 const RENDER_FALLBACK_TIMEOUT_MS = Number(import.meta.env.VITE_RENDER_FALLBACK_TIMEOUT_MS || 45000)
 const ENABLE_WS =
