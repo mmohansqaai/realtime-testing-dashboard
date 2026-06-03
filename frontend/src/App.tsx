@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import CiPipelinePanel from './CiPipelinePanel'
+import { apiUrl, fetchJson, getApiBaseUrl } from './apiClient'
 
 type Summary = {
   totals: {
@@ -40,52 +42,10 @@ const pct = (value: number, total: number): number => {
   return Math.round((value / total) * 100)
 }
 
-/** Deployed Render API — must match the URL shown in Render (may include a suffix like `-abc1`). */
-const DEFAULT_PROD_API = 'https://realtime-testing-dashboard-api-ld7t.onrender.com'
-const FETCH_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS || 20000)
-const RENDER_FALLBACK_TIMEOUT_MS = Number(import.meta.env.VITE_RENDER_FALLBACK_TIMEOUT_MS || 45000)
 const ENABLE_WS =
   import.meta.env.MODE === 'development'
     ? true
     : String(import.meta.env.VITE_ENABLE_WS || '').toLowerCase() === '1'
-
-/**
- * Empty base ⇒ relative `/api/...` ⇒ hits the deploy host (vercel.app), not Render.
- *
- * Do NOT use `import.meta.env.PROD`: Vite sets PROD only when `mode === 'production'`.
- * `vite build --mode staging` (and similar) leaves PROD false while still being a production
- * build — same bug as DEV true → empty `trimmed` → vercel.app/api/summary.
- *
- * Only `vite` dev server uses `MODE === 'development'` + empty base for the local proxy.
- */
-function getApiBaseUrl(): string {
-  const trimmed = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
-  if (import.meta.env.MODE === 'development') {
-    return trimmed
-  }
-  // Hard rule for deployed UI: always use same-origin /api via Vercel rewrite.
-  // This avoids cross-origin CORS failures even if VITE_API_BASE_URL is set in Vercel.
-  return ''
-}
-
-function getWsBaseUrl(): string {
-  const trimmed = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
-  if (import.meta.env.MODE === 'development') {
-    return trimmed
-  }
-  if (typeof window !== 'undefined' && trimmed && trimmed === window.location.origin.replace(/\/$/, '')) {
-    return DEFAULT_PROD_API
-  }
-  return trimmed || DEFAULT_PROD_API
-}
-
-const apiUrl = (path: string): string => {
-  const base = getApiBaseUrl()
-  if (!base) return path
-  return `${base}${path}`
-}
-
-const renderApiUrl = (path: string): string => `${DEFAULT_PROD_API}${path}`
 
 /** Primary URL for viewing a run's HTML report (ZIP bundle, single-file, or external link). */
 function reportViewerUrl(run: {
@@ -109,59 +69,12 @@ function reportViewerUrl(run: {
   return u.length > 0 ? u : null
 }
 
-async function fetchJson<T>(path: string): Promise<T> {
-  const primary = apiUrl(path)
-  const shouldTryRenderFallback =
-    import.meta.env.MODE !== 'development' && !primary.startsWith('http')
-  const candidates: Array<{ url: string; timeoutMs: number }> = [{ url: primary, timeoutMs: FETCH_TIMEOUT_MS }]
-  if (shouldTryRenderFallback) {
-    candidates.push({ url: renderApiUrl(path), timeoutMs: RENDER_FALLBACK_TIMEOUT_MS })
+async function loadSummaryJson(): Promise<Summary> {
+  const data = await fetchJson<Summary>('/api/summary')
+  if (!data.totals || typeof data.totals.runs !== 'number') {
+    throw new Error('Invalid /api/summary JSON')
   }
-
-  let lastError = ''
-  for (const candidate of candidates) {
-    const url = candidate.url
-    const sep = url.includes('?') ? '&' : '?'
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), candidate.timeoutMs)
-    try {
-      const response = await fetch(`${url}${sep}_=${Date.now()}`, {
-        cache: 'no-store',
-        signal: controller.signal,
-        headers: {
-          Accept: 'application/json',
-        },
-      })
-      if (!response.ok) {
-        throw new Error(`${response.status} ${response.statusText} ${url}`)
-      }
-      const ct = response.headers.get('content-type') || ''
-      if (!ct.includes('application/json')) {
-        throw new Error(`Expected JSON from API, got ${ct || 'unknown type'} from ${url}`)
-      }
-      const data = (await response.json()) as T
-      if (path.includes('summary') && data && typeof data === 'object') {
-        const s = data as unknown as Summary
-        if (!s.totals || typeof s.totals.runs !== 'number') {
-          throw new Error(`Invalid /api/summary JSON from ${url}`)
-        }
-      }
-      return data
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      if ((e instanceof Error && e.name === 'AbortError') || msg.includes('aborted')) {
-        lastError = `Timed out after ${candidate.timeoutMs}ms while loading ${url}.`
-      } else {
-        lastError = `Network/API error while loading ${url}: ${msg}`
-      }
-    } finally {
-      clearTimeout(timeoutId)
-    }
-  }
-
-  throw new Error(
-    `${lastError} Render may still be waking up; click Retry.`,
-  )
+  return data
 }
 
 const createDemoPayload = () => {
@@ -191,7 +104,7 @@ function App() {
 
   const loadSummary = useCallback(async (): Promise<boolean> => {
     try {
-      const data = await fetchJson<Summary>('/api/summary')
+      const data = await loadSummaryJson()
       setSummary(data)
       setFetchError(null)
       return true
@@ -216,7 +129,7 @@ function App() {
     let cancelled = false
     const run = async () => {
       // Render free tier can cold-start; backoff avoids a permanent "Loading..." state.
-      const delays = [0, 1500, 3000, 6000, 12000]
+      const delays = [0, 3000, 8000, 20000, 45000]
       for (let i = 0; i < delays.length; i += 1) {
         if (cancelled) return
         if (delays[i] > 0) {
@@ -234,13 +147,15 @@ function App() {
     }
   }, [loadSummary, loadConfig])
 
-  // If WebSocket cannot stay connected (common on free Render), still refresh summary periodically.
+  // Refresh when healthy; back off when the API is down to avoid request storms.
   useEffect(() => {
+    if (!summary && fetchError) return
+    const ms = fetchError ? 90000 : 15000
     const id = window.setInterval(() => {
       void loadSummary()
-    }, 15000)
+    }, ms)
     return () => window.clearInterval(id)
-  }, [loadSummary])
+  }, [loadSummary, summary, fetchError])
 
   useEffect(() => {
     if (!ENABLE_WS) {
@@ -251,7 +166,7 @@ function App() {
     let socket: WebSocket | null = null
 
     const connect = () => {
-      const base = getWsBaseUrl()
+      const base = getApiBaseUrl()
       if (base) {
         const wsUrl = base.replace(/^http/, 'ws')
         socket = new WebSocket(`${wsUrl}/ws`)
@@ -355,9 +270,9 @@ function App() {
           <div className="card-title">Connection error</div>
           <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{fetchError}</pre>
           <p className="meta">
-            API base in use: <strong>{getApiBaseUrl() || 'same-origin'}</strong>. Without{' '}
-            <code>VITE_API_BASE_URL</code>, production uses <code>same-origin /api</code> for REST (Vercel rewrite),
-            and <code>{DEFAULT_PROD_API}</code> for WebSocket.
+            API base: <strong>{getApiBaseUrl() || 'same-origin /api'}</strong> (Vercel proxy → Render, up to 60s on
+            cold start). First load can take 30–45s after idle — use Retry and wait; do not set{' '}
+            <code>VITE_API_BASE_URL</code> to the Render URL in Vercel (causes CORS errors).
           </p>
           <button type="button" onClick={() => void loadSummary()}>
             Retry
@@ -399,6 +314,8 @@ function App() {
           <div className={`pill ${connectionStatus === 'Live' ? 'status-live' : ''}`}>{connectionStatus}</div>
         </div>
       </header>
+
+      <CiPipelinePanel onPipelineFinished={() => void loadSummary()} />
 
       <section className="kpi-grid">
         <div className="kpi"><div className="label">Total Runs</div><div className="value">{summary.totals.runs}</div></div>

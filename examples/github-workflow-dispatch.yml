@@ -1,0 +1,12 @@
+# Add to your test repo workflow (.github/workflows/*.yml) so the dashboard can trigger runs.
+name: Playwright Tests
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # ... your existing test + dashboard publish steps ...

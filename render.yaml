@@ -18,6 +18,13 @@ services:
         value: https://realtime-testing-dashboard.vercel.app,https://realtime-testing-dashboard-ooka.vercel.app
       - key: AUTO_CREATE_SCHEMA
         value: "false"
+      - key: DATA_SOURCE
+        value: github
+      # Set in Render dashboard (secrets): GITHUB_CI_TOKEN, GITHUB_CI_REPO (e.g. mmohansqaai/SelfHealingPlaywrightFramework)
+      - key: GITHUB_CI_WORKFLOW_FILE
+        value: playwright.yml
+      - key: GITHUB_CI_DEFAULT_REF
+        value: main
 databases:
   - name: realtime-testing-dashboard-db
     plan: free

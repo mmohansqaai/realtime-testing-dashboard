@@ -43,6 +43,48 @@ class TestCaseResponse(TestCaseCreate):
         from_attributes = True
 
 
+class CiTriggerRequest(BaseModel):
+    ref: Optional[str] = None
+    workflow_file: Optional[str] = None
+    inputs: Optional[dict[str, str]] = None
+
+
+class CiStepFlow(BaseModel):
+    number: int
+    name: str
+    status: str
+    conclusion: Optional[str] = None
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+
+
+class CiJobFlow(BaseModel):
+    id: int
+    name: str
+    status: str
+    conclusion: Optional[str] = None
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    html_url: Optional[str] = None
+    steps: list[CiStepFlow] = []
+
+
+class CiRunFlow(BaseModel):
+    id: int
+    name: str
+    status: str
+    conclusion: Optional[str] = None
+    html_url: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    run_started_at: Optional[str] = None
+    run_attempt: Optional[int] = None
+    event: Optional[str] = None
+    head_branch: Optional[str] = None
+    head_sha: Optional[str] = None
+    jobs: list[CiJobFlow] = []
+
+
 class TestRunResponse(BaseModel):
     id: int
     suite_name: str
