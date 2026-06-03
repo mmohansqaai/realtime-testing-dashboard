@@ -338,6 +338,20 @@ function App() {
 
       <CiPipelinePanel onPipelineFinished={() => void loadSummary()} />
 
+      {dataSource === 'github' && summary.totals.runs === 0 ? (
+        <section className="card" style={{ marginBottom: 16, borderColor: 'var(--info)' }}>
+          <div className="card-title">No CI data yet</div>
+          <p className="meta" style={{ lineHeight: 1.55, marginBottom: 0 }}>
+            The API is connected (<code>DATA_SOURCE=github</code>) but Postgres has no ingested runs. Add a publish step
+            in <strong>mmohansqaai/SelfHealingPlaywrightFramework</strong> (see{' '}
+            <code>examples/github-actions-publish-step.yml</code>): set GitHub secret{' '}
+            <code>DASHBOARD_INGEST_TOKEN</code> to match Render <code>GITHUB_ACTIONS_INGEST_TOKEN</code>, then POST to{' '}
+            <code>https://realtime-testing-dashboard-api-ld7t.onrender.com/api/ingest/github-actions/run-with-report</code>
+            . Re-run the workflow and refresh this page.
+          </p>
+        </section>
+      ) : null}
+
       <section className="kpi-grid">
         <div className="kpi"><div className="label">Total Runs</div><div className="value">{summary.totals.runs}</div></div>
         <div className="kpi"><div className="label">Total Test Cases</div><div className="value">{summary.totals.cases}</div></div>

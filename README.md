@@ -138,6 +138,44 @@ Run these checks after deploy:
 - Keep the page open and confirm live updates continue via WebSocket.
 - Restart backend in Render and verify data persists (Postgres-backed).
 
+## Enable “CI pipeline control” on the dashboard
+
+This lets you click **Run pipeline** on the website and watch GitHub Actions steps live.
+
+### Step 1 — GitHub token (one time)
+
+1. GitHub → your profile picture → **Settings** → **Developer settings** → **Personal access tokens** → **Tokens (classic)** → **Generate new token**.
+2. Name it e.g. `dashboard-ci-trigger`.
+3. Check **`repo`** and **`workflow`**.
+4. Generate and **copy** the token (you will not see it again).
+
+### Step 2 — Render (one time)
+
+1. [Render](https://dashboard.render.com) → service **realtime-testing-dashboard-api** → **Environment**.
+2. Add:
+   - `GITHUB_CI_TOKEN` = paste the token → turn on **Secret**
+   - `GITHUB_CI_REPO` = `mmohansqaai/SelfHealingPlaywrightFramework` (already in `render.yaml` if you use Blueprint)
+3. **Save** → **Manual Deploy** / **Redeploy**.
+
+### Step 3 — Playwright repo workflow
+
+In **SelfHealingPlaywrightFramework**, open `.github/workflows/playwright.yml` (or your main test workflow). At the top, under `on:`, add:
+
+```yaml
+on:
+  push:
+  workflow_dispatch:
+```
+
+See [`examples/github-workflow-dispatch.yml`](examples/github-workflow-dispatch.yml).
+
+### Step 4 — Check
+
+1. Open `https://realtime-testing-dashboard-api-ld7t.onrender.com/api/ci/config` — should show `"enabled": true`.
+2. Refresh the Vercel dashboard — **CI pipeline control** should show workflow + **Run pipeline** button.
+
+If the workflow file is not `playwright.yml`, set `GITHUB_CI_WORKFLOW_FILE` on Render to match (e.g. `ci.yml`).
+
 ## Real data from GitHub Actions (optional)
 
 Set `DATA_SOURCE=github` on the backend and set a strong `GITHUB_ACTIONS_INGEST_TOKEN`.
@@ -166,7 +204,7 @@ jobs:
 
       - name: Publish results to dashboard
         env:
-          DASHBOARD_URL: https://realtime-testing-dashboard-api.onrender.com
+          DASHBOARD_URL: https://realtime-testing-dashboard-api-ld7t.onrender.com
           DASHBOARD_INGEST_TOKEN: ${{ secrets.DASHBOARD_INGEST_TOKEN }}
         run: |
           cat > payload.json <<'EOF'

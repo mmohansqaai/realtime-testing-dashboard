@@ -197,10 +197,30 @@ export default function CiPipelinePanel({ onPipelineFinished }: Props) {
     return (
       <section className="card ci-panel">
         <div className="card-title">CI pipeline control</div>
-        <p className="meta">
-          Not configured. Set <code>GITHUB_CI_TOKEN</code> and <code>GITHUB_CI_REPO</code> on the API (Render), then
-          redeploy. The workflow must include <code>workflow_dispatch</code>.
+        <p className="meta" style={{ lineHeight: 1.6 }}>
+          Not configured yet. Do this once on <strong>Render</strong> (API service → Environment):
         </p>
+        <ol className="meta ci-setup-steps">
+          <li>
+            Create a GitHub token: Profile → Settings → Developer settings → Personal access tokens →{' '}
+            <strong>Tokens (classic)</strong> → Generate. Enable scopes <code>repo</code> and <code>workflow</code>.
+          </li>
+          <li>
+            Add Render variable <code>GITHUB_CI_TOKEN</code> = that token (mark as <strong>Secret</strong>).
+          </li>
+          <li>
+            Add <code>GITHUB_CI_REPO</code> = <code>mmohansqaai/SelfHealingPlaywrightFramework</code> (if not already
+            set from <code>render.yaml</code>).
+          </li>
+          <li>
+            Click <strong>Save</strong> and <strong>Redeploy</strong> the API on Render, then refresh this page.
+          </li>
+          <li>
+            In the Playwright repo, your workflow file (e.g. <code>playwright.yml</code>) must include{' '}
+            <code>workflow_dispatch:</code> under <code>on:</code> (see{' '}
+            <code>examples/github-workflow-dispatch.yml</code> in the dashboard repo).
+          </li>
+        </ol>
       </section>
     )
   }

@@ -20,7 +20,9 @@ services:
         value: "false"
       - key: DATA_SOURCE
         value: github
-      # Set in Render dashboard (secrets): GITHUB_CI_TOKEN, GITHUB_CI_REPO (e.g. mmohansqaai/SelfHealingPlaywrightFramework)
+      # Set GITHUB_CI_TOKEN in Render dashboard (Secret). Repo is pre-set for SelfHealingPlaywrightFramework.
+      - key: GITHUB_CI_REPO
+        value: mmohansqaai/SelfHealingPlaywrightFramework
       - key: GITHUB_CI_WORKFLOW_FILE
         value: playwright.yml
       - key: GITHUB_CI_DEFAULT_REF

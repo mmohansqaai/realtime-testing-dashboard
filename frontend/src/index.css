@@ -224,6 +224,15 @@ button {
   margin-bottom: 16px;
 }
 
+.ci-setup-steps {
+  margin: 12px 0 0;
+  padding-left: 1.25rem;
+}
+
+.ci-setup-steps li {
+  margin-bottom: 10px;
+}
+
 .ci-controls {
   display: flex;
   flex-wrap: wrap;
