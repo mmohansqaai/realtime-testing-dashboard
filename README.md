@@ -121,18 +121,12 @@ alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
 
 ### B) Deploy frontend on Vercel
 
-1. Import the `frontend/` directory as a Vercel project (must include [`frontend/api/[...path].js`](frontend/api/%5B...path%5D.js) — the same-origin API proxy).
-2. **Do not** set `VITE_API_BASE_URL` to your Render URL in Vercel. The browser must call **same-origin** `/api/...` only; pointing at Render directly causes **CORS** errors.
-3. Optional Vercel env (only if your Render hostname differs):
-
-```bash
-RENDER_API_BASE_URL=https://<your-render-service>.onrender.com
-```
-
-4. Build settings:
+1. Import the `frontend/` directory as a Vercel project.
+2. **Do not** set `VITE_API_BASE_URL` to your Render URL in Vercel. The browser must call **same-origin** `/api/...` only (rewritten to Render in [`frontend/vercel.json`](frontend/vercel.json)).
+3. Build settings:
    - Build command: `npm run build`
    - Output directory: `dist`
-   - Config: [`frontend/vercel.json`](frontend/vercel.json) (60s proxy, SPA fallback)
+4. On Render, apply [`render.yaml`](render.yaml) (or add the `api-keep-warm` cron in the dashboard) so the free API does not sleep for 15+ minutes.
 
 ### C) Verify production deployment
 
@@ -216,7 +210,7 @@ Notes:
 - **CI step is green but still no HTML?** GitHub only checks the script’s exit code. If multipart uses the wrong field name (must be exactly `report_zip`, not `file` / `artifact` / `zip`), the API accepts the JSON metrics and returns **200** with **`has_html_report_zip": false`** and header **`X-Ingest-Report-Zip-Bytes: 0`**. Log the HTTP response body (`jq .has_html_report_zip`) or use `curl -v` and confirm `X-Ingest-Report-Zip-Bytes` is greater than zero. An empty `report_zip` file now returns **400** so the step fails visibly.
 - **Log says “JSON-only run - no multipart”** (from your own publish script): the request never used `multipart/form-data` with a `report_zip` file part—only `POST .../run` with JSON, or a bug/branch in Node that skips `FormData`. Fix: use **`curl -F payload=@payload.json -F report_zip=@report.zip`** to `.../run-with-report`, or copy [`examples/github-actions-publish-step.yml`](examples/github-actions-publish-step.yml) into **SelfHealingPlaywrightFramework** and wire `payload.json` the same way you do today.
 - **HTTP 422 on `run-with-report` with `curl -F payload=@payload.json`:** `curl` sends `payload` as a **file part** (with a filename). The API reads multipart manually (see `X-Ingest-Api-Revision: 3` on success). If you still get **422**, the JSON failed **schema** validation—save the body: `curl ... -o err.json -w '%{http_code}'` and open `err.json` (lists missing/wrong fields). Do **not** rely on `curl: (22)` alone; it hides the response body.
-- **Connection error / CORS / 500 on `/api/summary`:** Remove `VITE_API_BASE_URL` from Vercel if set to Render. Redeploy the frontend so `/api/*` is handled by the serverless proxy (not the old external rewrite). On Render free tier, the first request after idle can take **30–60s** — click **Retry** once and wait. Confirm `CORS_ORIGINS` on Render includes `https://<your-project>.vercel.app` (exact origin).
+- **Connection error / timeout on `/api/summary`:** Remove `VITE_API_BASE_URL` from Vercel if set to Render. Redeploy the frontend (uses `/api/:path*` → Render rewrite, not a serverless proxy). Wake the API: open `https://<your-render-service>.onrender.com/api/health`, wait for `{"status":"ok"}`, then **Retry** on the dashboard. Enable the Render **keep-warm** cron in `render.yaml` to avoid 30–60s cold starts.
 - **WebSocket “Reconnecting”** on Vercel: WebSocket is off by default in production (`VITE_ENABLE_WS=1` to enable). Polling every 15s is used instead. If you enable WS, set `CORS_ORIGINS` on Render to your exact Vercel URL.
 
 ### D) Rollback and recovery

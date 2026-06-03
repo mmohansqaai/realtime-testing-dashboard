@@ -25,6 +25,12 @@ services:
         value: playwright.yml
       - key: GITHUB_CI_DEFAULT_REF
         value: main
+# Ping API every 14 minutes so the free web service stays warm (avoids 30–60s cold starts).
+cron:
+  - name: api-keep-warm
+    schedule: "*/14 * * * *"
+    command: curl -fsS "https://realtime-testing-dashboard-api-ld7t.onrender.com/api/health" >/dev/null || true
+
 databases:
   - name: realtime-testing-dashboard-db
     plan: free

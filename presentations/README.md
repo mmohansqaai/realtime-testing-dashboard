@@ -4,7 +4,7 @@
 
 **File:** `Real-Time_Testing_Dashboard_Technical_Briefing.pptx`
 
-Built from the Self-Healing Playwright technical briefing template (same layouts, purple/gold branding, Montserrat/Inter typography, `#TheFutureWorksHere` footer).
+Built from the Self-Healing Playwright technical briefing template (same layouts, purple/gold branding, Montserrat/Inter typography, `#TheFutureWorksHere` footer). Regenerate after text changes; image replacement uses generated dashboard assets in `presentations/assets/generated/`.
 
 ### Regenerate
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import CiPipelinePanel from './CiPipelinePanel'
-import { apiUrl, fetchJson, getApiBaseUrl } from './apiClient'
+import { apiUrl, fetchHealth, fetchJson, getApiBaseUrl } from './apiClient'
 
 type Summary = {
   totals: {
@@ -96,6 +96,7 @@ const createDemoPayload = () => {
 function App() {
   const [summary, setSummary] = useState<Summary | null>(null)
   const [fetchError, setFetchError] = useState<string | null>(null)
+  const [wakeStatus, setWakeStatus] = useState<string | null>(null)
   const [wsError, setWsError] = useState<string | null>(null)
   const [connectionStatus, setConnectionStatus] = useState('Connecting...')
   const reconnectTimerRef = useRef<number | null>(null)
@@ -128,20 +129,33 @@ function App() {
   useEffect(() => {
     let cancelled = false
     const run = async () => {
-      // Render free tier can cold-start; backoff avoids a permanent "Loading..." state.
-      const delays = [0, 3000, 8000, 20000, 45000]
+      const delays = [0, 4000, 12000, 25000]
       for (let i = 0; i < delays.length; i += 1) {
         if (cancelled) return
         if (delays[i] > 0) {
           await new Promise((resolve) => window.setTimeout(resolve, delays[i]))
           if (cancelled) return
         }
+        setWakeStatus(
+          i === 0
+            ? 'Connecting to API…'
+            : `Waking Render API (attempt ${i + 1}/${delays.length})…`,
+        )
+        try {
+          await fetchHealth()
+        } catch {
+          continue
+        }
         const ok = await loadSummary()
-        if (ok) return
+        if (ok) {
+          setWakeStatus(null)
+          void loadConfig()
+          return
+        }
       }
+      setWakeStatus(null)
     }
     void run()
-    void loadConfig()
     return () => {
       cancelled = true
     }
@@ -270,9 +284,12 @@ function App() {
           <div className="card-title">Connection error</div>
           <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{fetchError}</pre>
           <p className="meta">
-            API base: <strong>{getApiBaseUrl() || 'same-origin /api'}</strong> (Vercel proxy → Render, up to 60s on
-            cold start). First load can take 30–45s after idle — use Retry and wait; do not set{' '}
-            <code>VITE_API_BASE_URL</code> to the Render URL in Vercel (causes CORS errors).
+            API base: <strong>{getApiBaseUrl() || 'same-origin /api'}</strong> (Vercel rewrite → Render). After idle,
+            the first request can take 30–60s. Do not set <code>VITE_API_BASE_URL</code> to Render in Vercel. Open{' '}
+            <a href="https://realtime-testing-dashboard-api-ld7t.onrender.com/api/health" target="_blank" rel="noreferrer">
+              Render /api/health
+            </a>{' '}
+            in a tab to wake the API, then Retry.
           </p>
           <button type="button" onClick={() => void loadSummary()}>
             Retry
@@ -283,7 +300,11 @@ function App() {
   }
 
   if (!summary) {
-    return <div className="container">Loading dashboard...</div>
+    return (
+      <div className="container">
+        <p>{wakeStatus || 'Loading dashboard…'}</p>
+      </div>
+    )
   }
 
   return (

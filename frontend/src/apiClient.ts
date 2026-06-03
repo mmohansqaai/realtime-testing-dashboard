@@ -1,11 +1,11 @@
-const FETCH_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS || 60000)
+const HEALTH_TIMEOUT_MS = Number(import.meta.env.VITE_API_HEALTH_TIMEOUT_MS || 25000)
+const FETCH_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS || 90000)
 
 export function getApiBaseUrl(): string {
   const trimmed = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
   if (import.meta.env.MODE === 'development') {
     return trimmed
   }
-  // Production: same-origin /api via Vercel serverless proxy (never cross-origin to Render).
   return ''
 }
 
@@ -39,6 +39,15 @@ async function fetchOnce<T>(url: string, init: RequestInit, timeoutMs: number): 
   } finally {
     window.clearTimeout(timeoutId)
   }
+}
+
+/** Lightweight probe — use before /api/summary on cold Render instances. */
+export async function fetchHealth(): Promise<{ status: string }> {
+  return fetchOnce<{ status: string }>(
+    apiUrl('/api/health'),
+    { headers: { Accept: 'application/json' } },
+    HEALTH_TIMEOUT_MS,
+  )
 }
 
 export async function fetchJson<T>(path: string): Promise<T> {
