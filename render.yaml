@@ -20,3 +20,9 @@ services:
         sync: false
       - key: AUTO_CREATE_SCHEMA
         value: "false"
+      - key: GITHUB_CI_REPO
+        value: mmohansqaai/SelfHealingPlaywrightFramework
+      - key: GITHUB_CI_WORKFLOW_FILE
+        value: playwright.yml
+      - key: GITHUB_CI_DEFAULT_REF
+        value: main

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import CiPipelinePanel from './CiPipelinePanel'
+import { DEFAULT_PROD_API, FETCH_TIMEOUT_MS, apiUrl, fetchJson, getApiBaseUrl } from './apiClient'
 
 type Summary = {
   totals: {
@@ -40,72 +42,12 @@ const pct = (value: number, total: number): number => {
   return Math.round((value / total) * 100)
 }
 
-/** Deployed Render API — must match the URL shown in Render (may include a suffix like `-abc1`). */
-const DEFAULT_PROD_API = 'https://realtime-testing-dashboard.onrender.com'
-const FETCH_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS || 90000)
-const ENABLE_WS =
-  import.meta.env.MODE === 'development'
-    ? true
-    : String(import.meta.env.VITE_ENABLE_WS || '').toLowerCase() === '1'
-
-/**
- * Production talks to Render directly. Vercel /api rewrites time out (~30s) before
- * a sleeping Render free instance wakes (~40–60s), which shows as NS_BINDING_ABORTED.
- */
-function getApiBaseUrl(): string {
-  const trimmed = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
-  if (import.meta.env.MODE === 'development') {
-    return trimmed
-  }
-  return trimmed || DEFAULT_PROD_API
-}
+const ENABLE_WS = false
 
 function getWsBaseUrl(): string {
   return getApiBaseUrl() || DEFAULT_PROD_API
 }
 
-const apiUrl = (path: string): string => {
-  const base = getApiBaseUrl()
-  if (!base) return path
-  return `${base}${path}`
-}
-
-async function fetchJson<T>(path: string, timeoutMs = FETCH_TIMEOUT_MS): Promise<T> {
-  const url = apiUrl(path)
-  const sep = url.includes('?') ? '&' : '?'
-  const controller = new AbortController()
-  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs)
-  try {
-    const response = await fetch(`${url}${sep}_=${Date.now()}`, {
-      cache: 'no-store',
-      signal: controller.signal,
-      headers: { Accept: 'application/json' },
-    })
-    if (!response.ok) {
-      throw new Error(`${response.status} ${response.statusText} ${url}`)
-    }
-    const ct = response.headers.get('content-type') || ''
-    if (!ct.includes('application/json')) {
-      throw new Error(`Expected JSON from API, got ${ct || 'unknown type'} from ${url}`)
-    }
-    const data = (await response.json()) as T
-    if (path.includes('summary') && data && typeof data === 'object') {
-      const s = data as unknown as Summary
-      if (!s.totals || typeof s.totals.runs !== 'number') {
-        throw new Error(`Invalid /api/summary JSON from ${url}`)
-      }
-    }
-    return data
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    if ((e instanceof Error && e.name === 'AbortError') || msg.includes('aborted')) {
-      throw new Error(`Timed out after ${timeoutMs}ms while loading ${url}. Open ${DEFAULT_PROD_API}/api/health then Retry.`)
-    }
-    throw new Error(`Network/API error while loading ${url}: ${msg}`)
-  } finally {
-    window.clearTimeout(timeoutId)
-  }
-}
 function reportViewerUrl(run: {
   id: number
   html_report_url?: string | null
@@ -338,7 +280,11 @@ function App() {
   }
 
   if (!summary) {
-    return <div className="container">Loading dashboard...</div>
+    return (
+      <div className="container">
+        <p>Waking API at {DEFAULT_PROD_API} (Render free tier can take ~50s)…</p>
+      </div>
+    )
   }
 
   return (
@@ -369,6 +315,8 @@ function App() {
           <div className={`pill ${connectionStatus === 'Live' ? 'status-live' : ''}`}>{connectionStatus}</div>
         </div>
       </header>
+
+      <CiPipelinePanel onPipelineFinished={() => void loadSummary()} />
 
       <section className="kpi-grid">
         <div className="kpi"><div className="label">Total Runs</div><div className="value">{summary.totals.runs}</div></div>

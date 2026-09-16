@@ -136,6 +136,18 @@ Backend startup command runs migrations before boot:
 alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
 ```
 
+### CI pipeline control (Run pipeline)
+
+On **Render** → your API service → **Environment**, then **Save** and **Redeploy**:
+
+1. `GITHUB_CI_TOKEN` — GitHub **classic** PAT with **`repo`** and **`workflow`**
+2. `GITHUB_CI_REPO` — `mmohansqaai/SelfHealingPlaywrightFramework`
+3. Optional: `GITHUB_CI_WORKFLOW_FILE=playwright.yml`, `GITHUB_CI_DEFAULT_REF=main`
+
+Confirm: https://realtime-testing-dashboard.onrender.com/api/ci/config shows `"enabled": true`.
+
+The Playwright workflow must include `workflow_dispatch:` (already in `playwright.yml`).
+
 ### C) Deploy frontend on Vercel
 
 1. Import the `frontend/` directory as a Vercel project.

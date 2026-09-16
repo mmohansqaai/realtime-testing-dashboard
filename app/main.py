@@ -13,7 +13,8 @@ from pydantic import ValidationError
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
-from . import repository, schemas
+from . import github_ci, repository, schemas
+from .github_ci import GitHubCiError
 from .html_theme import inject_dashboard_theme, inject_dashboard_theme_bytes
 from .report_zip import ReportZipError, read_member
 from .database import Base, engine, get_db, SessionLocal
@@ -66,7 +67,52 @@ def health():
 
 @app.get('/api/config')
 def config():
-    return {'data_source': DATA_SOURCE}
+    return {'data_source': DATA_SOURCE, 'ci': github_ci.ci_config()}
+
+
+def _github_ci_http_error(exc: GitHubCiError) -> HTTPException:
+    return HTTPException(status_code=exc.status_code, detail=str(exc))
+
+
+@app.get('/api/ci/config')
+def ci_config():
+    return github_ci.ci_config()
+
+
+@app.get('/api/ci/workflows')
+async def ci_workflows():
+    try:
+        return {'workflows': await github_ci.list_workflows()}
+    except GitHubCiError as e:
+        raise _github_ci_http_error(e) from e
+
+
+@app.get('/api/ci/runs')
+async def ci_runs(limit: int = 10, workflow_file: Optional[str] = None):
+    try:
+        return {'runs': await github_ci.list_recent_runs(limit=limit, workflow_file=workflow_file)}
+    except GitHubCiError as e:
+        raise _github_ci_http_error(e) from e
+
+
+@app.get('/api/ci/runs/{run_id}', response_model=schemas.CiRunFlow)
+async def ci_run_flow(run_id: int):
+    try:
+        return await github_ci.get_run_flow(run_id)
+    except GitHubCiError as e:
+        raise _github_ci_http_error(e) from e
+
+
+@app.post('/api/ci/trigger')
+async def ci_trigger(payload: schemas.CiTriggerRequest):
+    try:
+        return await github_ci.trigger_workflow(
+            ref=payload.ref,
+            workflow_file=payload.workflow_file,
+            inputs=payload.inputs,
+        )
+    except GitHubCiError as e:
+        raise _github_ci_http_error(e) from e
 
 
 @app.get('/api/summary')
