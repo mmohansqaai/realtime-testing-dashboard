@@ -43,40 +43,25 @@ const pct = (value: number, total: number): number => {
 /** Deployed Render API — must match the URL shown in Render (may include a suffix like `-abc1`). */
 const DEFAULT_PROD_API = 'https://realtime-testing-dashboard.onrender.com'
 const FETCH_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS || 90000)
-const RENDER_FALLBACK_TIMEOUT_MS = Number(import.meta.env.VITE_RENDER_FALLBACK_TIMEOUT_MS || 90000)
 const ENABLE_WS =
   import.meta.env.MODE === 'development'
     ? true
     : String(import.meta.env.VITE_ENABLE_WS || '').toLowerCase() === '1'
 
 /**
- * Empty base ⇒ relative `/api/...` ⇒ hits the deploy host (vercel.app), not Render.
- *
- * Do NOT use `import.meta.env.PROD`: Vite sets PROD only when `mode === 'production'`.
- * `vite build --mode staging` (and similar) leaves PROD false while still being a production
- * build — same bug as DEV true → empty `trimmed` → vercel.app/api/summary.
- *
- * Only `vite` dev server uses `MODE === 'development'` + empty base for the local proxy.
+ * Production talks to Render directly. Vercel /api rewrites time out (~30s) before
+ * a sleeping Render free instance wakes (~40–60s), which shows as NS_BINDING_ABORTED.
  */
 function getApiBaseUrl(): string {
   const trimmed = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
   if (import.meta.env.MODE === 'development') {
     return trimmed
   }
-  // Hard rule for deployed UI: always use same-origin /api via Vercel rewrite.
-  // This avoids cross-origin CORS failures even if VITE_API_BASE_URL is set in Vercel.
-  return ''
+  return trimmed || DEFAULT_PROD_API
 }
 
 function getWsBaseUrl(): string {
-  const trimmed = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
-  if (import.meta.env.MODE === 'development') {
-    return trimmed
-  }
-  if (typeof window !== 'undefined' && trimmed && trimmed === window.location.origin.replace(/\/$/, '')) {
-    return DEFAULT_PROD_API
-  }
-  return trimmed || DEFAULT_PROD_API
+  return getApiBaseUrl() || DEFAULT_PROD_API
 }
 
 const apiUrl = (path: string): string => {
@@ -85,9 +70,42 @@ const apiUrl = (path: string): string => {
   return `${base}${path}`
 }
 
-const renderApiUrl = (path: string): string => `${DEFAULT_PROD_API}${path}`
-
-/** Primary URL for viewing a run's HTML report (ZIP bundle, single-file, or external link). */
+async function fetchJson<T>(path: string, timeoutMs = FETCH_TIMEOUT_MS): Promise<T> {
+  const url = apiUrl(path)
+  const sep = url.includes('?') ? '&' : '?'
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(`${url}${sep}_=${Date.now()}`, {
+      cache: 'no-store',
+      signal: controller.signal,
+      headers: { Accept: 'application/json' },
+    })
+    if (!response.ok) {
+      throw new Error(`${response.status} ${response.statusText} ${url}`)
+    }
+    const ct = response.headers.get('content-type') || ''
+    if (!ct.includes('application/json')) {
+      throw new Error(`Expected JSON from API, got ${ct || 'unknown type'} from ${url}`)
+    }
+    const data = (await response.json()) as T
+    if (path.includes('summary') && data && typeof data === 'object') {
+      const s = data as unknown as Summary
+      if (!s.totals || typeof s.totals.runs !== 'number') {
+        throw new Error(`Invalid /api/summary JSON from ${url}`)
+      }
+    }
+    return data
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    if ((e instanceof Error && e.name === 'AbortError') || msg.includes('aborted')) {
+      throw new Error(`Timed out after ${timeoutMs}ms while loading ${url}. Open ${DEFAULT_PROD_API}/api/health then Retry.`)
+    }
+    throw new Error(`Network/API error while loading ${url}: ${msg}`)
+  } finally {
+    window.clearTimeout(timeoutId)
+  }
+}
 function reportViewerUrl(run: {
   id: number
   html_report_url?: string | null
@@ -107,61 +125,6 @@ function reportViewerUrl(run: {
   }
   const u = (run.html_report_url ?? '').trim()
   return u.length > 0 ? u : null
-}
-
-async function fetchJson<T>(path: string): Promise<T> {
-  const primary = apiUrl(path)
-  const shouldTryRenderFallback =
-    import.meta.env.MODE !== 'development' && !primary.startsWith('http')
-  const candidates: Array<{ url: string; timeoutMs: number }> = [{ url: primary, timeoutMs: FETCH_TIMEOUT_MS }]
-  if (shouldTryRenderFallback) {
-    candidates.push({ url: renderApiUrl(path), timeoutMs: RENDER_FALLBACK_TIMEOUT_MS })
-  }
-
-  let lastError = ''
-  for (const candidate of candidates) {
-    const url = candidate.url
-    const sep = url.includes('?') ? '&' : '?'
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), candidate.timeoutMs)
-    try {
-      const response = await fetch(`${url}${sep}_=${Date.now()}`, {
-        cache: 'no-store',
-        signal: controller.signal,
-        headers: {
-          Accept: 'application/json',
-        },
-      })
-      if (!response.ok) {
-        throw new Error(`${response.status} ${response.statusText} ${url}`)
-      }
-      const ct = response.headers.get('content-type') || ''
-      if (!ct.includes('application/json')) {
-        throw new Error(`Expected JSON from API, got ${ct || 'unknown type'} from ${url}`)
-      }
-      const data = (await response.json()) as T
-      if (path.includes('summary') && data && typeof data === 'object') {
-        const s = data as unknown as Summary
-        if (!s.totals || typeof s.totals.runs !== 'number') {
-          throw new Error(`Invalid /api/summary JSON from ${url}`)
-        }
-      }
-      return data
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      if ((e instanceof Error && e.name === 'AbortError') || msg.includes('aborted')) {
-        lastError = `Timed out after ${candidate.timeoutMs}ms while loading ${url}.`
-      } else {
-        lastError = `Network/API error while loading ${url}: ${msg}`
-      }
-    } finally {
-      clearTimeout(timeoutId)
-    }
-  }
-
-  throw new Error(
-    `${lastError} Render may still be waking up; click Retry.`,
-  )
 }
 
 const createDemoPayload = () => {
@@ -189,9 +152,18 @@ function App() {
   const [dataSource, setDataSource] = useState<string>('unknown')
   const [selectedReportRunId, setSelectedReportRunId] = useState<number | null>(null)
 
+  const loadInFlight = useRef(false)
+  const apiWokeRef = useRef(false)
+
   const loadSummary = useCallback(async (): Promise<boolean> => {
+    if (loadInFlight.current) return false
+    loadInFlight.current = true
     try {
-      const data = await fetchJson<Summary>('/api/summary')
+      if (!apiWokeRef.current) {
+        await fetchJson<{ status: string }>('/api/health', FETCH_TIMEOUT_MS)
+        apiWokeRef.current = true
+      }
+      const data = await fetchJson<Summary>('/api/summary', 25000)
       setSummary(data)
       setFetchError(null)
       return true
@@ -200,6 +172,8 @@ function App() {
       setFetchError(msg)
       console.error('[dashboard] /api/summary failed', msg)
       return false
+    } finally {
+      loadInFlight.current = false
     }
   }, [])
 
@@ -215,22 +189,11 @@ function App() {
   useEffect(() => {
     let cancelled = false
     const run = async () => {
-      // Render free tier cold-start is often 40–60s; wait on /api/health first.
-      try {
-        await fetchJson('/api/health')
-      } catch {
-        // continue to summary; timeout already 90s
-      }
-      if (cancelled) return
       const ok = await loadSummary()
+      if (cancelled) return
       if (ok) {
         void loadConfig()
         return
-      }
-      await new Promise((resolve) => window.setTimeout(resolve, 8000))
-      if (!cancelled) {
-        await loadSummary()
-        void loadConfig()
       }
     }
     void run()
@@ -360,12 +323,11 @@ function App() {
           <div className="card-title">Connection error</div>
           <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{fetchError}</pre>
           <p className="meta">
-            API: <strong>{getApiBaseUrl() || 'same-origin /api'}</strong> →{' '}
-            <code>{DEFAULT_PROD_API}</code>. First load after idle can take ~50s (Render free). Open{' '}
+            The UI calls Render directly:{' '}
             <a href={`${DEFAULT_PROD_API}/api/health`} target="_blank" rel="noreferrer">
               {DEFAULT_PROD_API}/api/health
-            </a>{' '}
-            then Retry. Do not set <code>VITE_API_BASE_URL</code> in Vercel.
+            </a>
+            . First load after idle can take ~50s. Wait, then Retry. Redeploy Render after this CORS update.
           </p>
           <button type="button" onClick={() => void loadSummary()}>
             Retry
