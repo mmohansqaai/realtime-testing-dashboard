@@ -105,10 +105,10 @@ p { color: var(--muted); margin: 0; }
 }
 
 .fill { height: 100%; }
-.success { background: var(--success); }
-.danger { background: var(--danger); }
-.warning { background: var(--warning); }
-.info { background: var(--info); }
+.fill.success { background: var(--success); }
+.fill.danger { background: var(--danger); }
+.fill.warning { background: var(--warning); }
+.fill.info { background: var(--info); }
 
 table {
   width: 100%;
@@ -289,9 +289,24 @@ button {
 .ci-step {
   padding: 6px 0;
   color: var(--muted);
+  background: transparent;
+  line-height: 1.4;
+  word-break: break-word;
 }
 
-.ci-step.in-progress { color: var(--warning); }
-.ci-step.success { color: var(--success); }
-.ci-step.failure { color: var(--danger); }
-.ci-step.skipped { color: var(--muted); }
+.ci-step.ci-running {
+  color: var(--warning);
+  font-weight: 700;
+}
+
+.ci-step.ci-ok { color: var(--success); }
+.ci-step.ci-fail { color: var(--danger); }
+.ci-step.ci-skip { color: var(--muted); }
+
+.ci-job-status {
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.ci-job-status.running { color: var(--warning); }

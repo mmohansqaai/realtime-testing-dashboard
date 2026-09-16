@@ -70,10 +70,10 @@ function formatCiError(message: string): string {
 }
 
 function stepClass(step: CiStep): string {
-  if (step.status === 'in_progress') return 'ci-step in-progress'
-  if (step.conclusion === 'success') return 'ci-step success'
-  if (step.conclusion === 'failure') return 'ci-step failure'
-  if (step.conclusion === 'skipped') return 'ci-step skipped'
+  if (step.status === 'in_progress') return 'ci-step ci-running'
+  if (step.conclusion === 'success') return 'ci-step ci-ok'
+  if (step.conclusion === 'failure') return 'ci-step ci-fail'
+  if (step.conclusion === 'skipped') return 'ci-step ci-skip'
   return 'ci-step'
 }
 
@@ -285,12 +285,16 @@ export default function CiPipelinePanel({ onPipelineFinished }: Props) {
             <div key={job.id} className="ci-job">
               <div className="ci-job-title">
                 <span>{job.name}</span>
-                <span className="meta">{job.status}</span>
+                <span className={`ci-job-status ${job.status === 'in_progress' ? 'running' : ''}`}>
+                  {job.status === 'in_progress' ? 'Running…' : job.status}
+                </span>
               </div>
               <ul className="ci-steps">
                 {job.steps.map((step) => (
                   <li key={`${job.id}-${step.number}`} className={stepClass(step)}>
-                    <span>{stepIcon(step)}</span> {step.name}
+                    <span>{stepIcon(step)}</span>{' '}
+                    {step.name || `Step ${step.number}`}
+                    {step.status === 'in_progress' ? ' — running' : ''}
                   </li>
                 ))}
               </ul>
