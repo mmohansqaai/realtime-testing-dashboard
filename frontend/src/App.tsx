@@ -42,8 +42,8 @@ const pct = (value: number, total: number): number => {
 
 /** Deployed Render API — must match the URL shown in Render (may include a suffix like `-abc1`). */
 const DEFAULT_PROD_API = 'https://realtime-testing-dashboard.onrender.com'
-const FETCH_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS || 20000)
-const RENDER_FALLBACK_TIMEOUT_MS = Number(import.meta.env.VITE_RENDER_FALLBACK_TIMEOUT_MS || 45000)
+const FETCH_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS || 90000)
+const RENDER_FALLBACK_TIMEOUT_MS = Number(import.meta.env.VITE_RENDER_FALLBACK_TIMEOUT_MS || 90000)
 const ENABLE_WS =
   import.meta.env.MODE === 'development'
     ? true
@@ -215,32 +215,37 @@ function App() {
   useEffect(() => {
     let cancelled = false
     const run = async () => {
-      // Render free tier can cold-start; backoff avoids a permanent "Loading..." state.
-      const delays = [0, 1500, 3000, 6000, 12000]
-      for (let i = 0; i < delays.length; i += 1) {
-        if (cancelled) return
-        if (delays[i] > 0) {
-          await new Promise((resolve) => window.setTimeout(resolve, delays[i]))
-          if (cancelled) return
-        }
-        const ok = await loadSummary()
-        if (ok) return
+      // Render free tier cold-start is often 40–60s; wait on /api/health first.
+      try {
+        await fetchJson('/api/health')
+      } catch {
+        // continue to summary; timeout already 90s
+      }
+      if (cancelled) return
+      const ok = await loadSummary()
+      if (ok) {
+        void loadConfig()
+        return
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 8000))
+      if (!cancelled) {
+        await loadSummary()
+        void loadConfig()
       }
     }
     void run()
-    void loadConfig()
     return () => {
       cancelled = true
     }
   }, [loadSummary, loadConfig])
 
-  // If WebSocket cannot stay connected (common on free Render), still refresh summary periodically.
   useEffect(() => {
+    if (!summary) return
     const id = window.setInterval(() => {
       void loadSummary()
     }, 15000)
     return () => window.clearInterval(id)
-  }, [loadSummary])
+  }, [loadSummary, summary])
 
   useEffect(() => {
     if (!ENABLE_WS) {
@@ -355,9 +360,12 @@ function App() {
           <div className="card-title">Connection error</div>
           <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{fetchError}</pre>
           <p className="meta">
-            API base in use: <strong>{getApiBaseUrl() || 'same-origin'}</strong>. Without{' '}
-            <code>VITE_API_BASE_URL</code>, production uses <code>same-origin /api</code> for REST (Vercel rewrite),
-            and <code>{DEFAULT_PROD_API}</code> for WebSocket.
+            API: <strong>{getApiBaseUrl() || 'same-origin /api'}</strong> →{' '}
+            <code>{DEFAULT_PROD_API}</code>. First load after idle can take ~50s (Render free). Open{' '}
+            <a href={`${DEFAULT_PROD_API}/api/health`} target="_blank" rel="noreferrer">
+              {DEFAULT_PROD_API}/api/health
+            </a>{' '}
+            then Retry. Do not set <code>VITE_API_BASE_URL</code> in Vercel.
           </p>
           <button type="button" onClick={() => void loadSummary()}>
             Retry

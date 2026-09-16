@@ -7,7 +7,11 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://realtime-testing-dashboard-api-ld7t.onrender.com/api/:path*"
+      "destination": "https://realtime-testing-dashboard.onrender.com/api/:path*"
+    },
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
     }
   ]
 }
