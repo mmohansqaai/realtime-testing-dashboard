@@ -12,8 +12,12 @@ export class ApiError extends Error {
 }
 
 export function getApiBaseUrl(): string {
+  const configured = String(import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/$/, '')
+  if (configured) {
+    return configured
+  }
   if (import.meta.env.DEV) {
-    return (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
+    return ''
   }
   return DEFAULT_PROD_API
 }
@@ -50,7 +54,7 @@ async function fetchOnce<T>(url: string, init: RequestInit, timeoutMs: number): 
     const msg = e instanceof Error ? e.message : String(e)
     if ((e instanceof Error && e.name === 'AbortError') || msg.includes('aborted')) {
       throw new Error(
-        `Timed out after ${timeoutMs}ms while loading ${url}. Open ${DEFAULT_PROD_API}/api/health then Retry.`,
+        `Timed out after ${timeoutMs}ms while loading ${url}. Open ${getApiBaseUrl() || DEFAULT_PROD_API}/api/health then Retry.`,
       )
     }
     throw new Error(`Network/API error while loading ${url}: ${msg}`)

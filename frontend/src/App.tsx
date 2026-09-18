@@ -258,8 +258,8 @@ function App() {
           <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{fetchError}</pre>
           <p className="meta">
             The UI calls Render directly:{' '}
-            <a href={`${DEFAULT_PROD_API}/api/health`} target="_blank" rel="noreferrer">
-              {DEFAULT_PROD_API}/api/health
+            <a href={`${getApiBaseUrl() || DEFAULT_PROD_API}/api/health`} target="_blank" rel="noreferrer">
+              {getApiBaseUrl() || DEFAULT_PROD_API}/api/health
             </a>
             . First load after idle can take ~50s. Wait, then Retry. Redeploy Render after this CORS update.
           </p>
@@ -274,7 +274,7 @@ function App() {
   if (!summary) {
     return (
       <div className="container">
-        <p>Waking API at {DEFAULT_PROD_API} (Render free tier can take ~50s)…</p>
+        <p>Waking API at {getApiBaseUrl() || DEFAULT_PROD_API} (Render free tier can take ~50s)…</p>
       </div>
     )
   }
