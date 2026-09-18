@@ -1,6 +1,16 @@
 export const DEFAULT_PROD_API = 'https://realtime-testing-dashboard.onrender.com'
 export const FETCH_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS || 90000)
 
+export class ApiError extends Error {
+  status: number
+
+  constructor(status: number, statusText: string, body: string, url: string) {
+    super(`${status} ${statusText}: ${body || url}`)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
 export function getApiBaseUrl(): string {
   if (import.meta.env.DEV) {
     return (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
@@ -26,7 +36,7 @@ async function fetchOnce<T>(url: string, init: RequestInit, timeoutMs: number): 
     })
     if (!response.ok) {
       const text = await response.text()
-      throw new Error(`${response.status} ${response.statusText}: ${text || url}`)
+      throw new ApiError(response.status, response.statusText, text, url)
     }
     const ct = response.headers.get('content-type') || ''
     if (!ct.includes('application/json')) {
@@ -34,6 +44,9 @@ async function fetchOnce<T>(url: string, init: RequestInit, timeoutMs: number): 
     }
     return (await response.json()) as T
   } catch (e) {
+    if (e instanceof ApiError) {
+      throw e
+    }
     const msg = e instanceof Error ? e.message : String(e)
     if ((e instanceof Error && e.name === 'AbortError') || msg.includes('aborted')) {
       throw new Error(
@@ -48,6 +61,18 @@ async function fetchOnce<T>(url: string, init: RequestInit, timeoutMs: number): 
 
 export async function fetchJson<T>(path: string, timeoutMs = FETCH_TIMEOUT_MS): Promise<T> {
   return fetchOnce<T>(apiUrl(path), { headers: { Accept: 'application/json' } }, timeoutMs)
+}
+
+/** GET JSON; HTTP 404 returns null instead of throwing. Other failures still throw. */
+export async function fetchJsonOr404<T>(path: string, timeoutMs = FETCH_TIMEOUT_MS): Promise<T | null> {
+  try {
+    return await fetchJson<T>(path, timeoutMs)
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) {
+      return null
+    }
+    throw e
+  }
 }
 
 export async function fetchJsonPost<T>(path: string, body: unknown, timeoutMs = FETCH_TIMEOUT_MS): Promise<T> {

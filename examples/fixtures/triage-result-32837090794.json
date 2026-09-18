@@ -1,0 +1,24 @@
+{
+  "provider": "github-actions",
+  "repository": "mmohansqaai/SelfHealingPlaywrightFramework",
+  "runId": "32837090794",
+  "triageState": "COMPLETED",
+  "pipelineName": "Playwright Tests",
+  "pipelineStatus": "FAILED",
+  "failedJob": "Run tests (Ubuntu)",
+  "failedStep": "Publish results to dashboard",
+  "classification": "CI_INFRASTRUCTURE",
+  "subtype": "DOWNSTREAM_SERVICE_UNAVAILABLE",
+  "confidence": 91,
+  "probableCause": "Dashboard service did not respond to repeated health checks.",
+  "evidence": [
+    "Tests did not fail",
+    "Artifacts uploaded successfully",
+    "Publishing step failed",
+    "Repeated dashboard health checks timed out",
+    "curl exited with code 28"
+  ],
+  "recommendedAction": "Validate downstream dashboard service availability and retry publishing.",
+  "humanReviewRequired": false,
+  "analysisMode": "DETERMINISTIC"
+}

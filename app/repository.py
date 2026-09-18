@@ -4,10 +4,20 @@ from typing import Optional
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session, joinedload
 
-from .models import TestCaseResult, TestRun
+from .models import TestCaseResult, TestRun, TriageResult
 from .settings import DATA_SOURCE
 
 FINAL_STATUSES = {'PASSED', 'FAILED', 'BLOCKED', 'SKIPPED'}
+
+
+def _ci_identity(run: TestRun):
+    if run.ci_provider and run.ci_repository and run.ci_run_id:
+        return {
+            'provider': run.ci_provider,
+            'repository': run.ci_repository,
+            'runId': run.ci_run_id,
+        }
+    return None
 
 
 def create_run(db: Session, payload, report_zip: Optional[bytes] = None):
@@ -17,6 +27,7 @@ def create_run(db: Session, payload, report_zip: Optional[bytes] = None):
 
         index_path = validate_report_zip_bytes(report_zip)
 
+    ci = payload.ci
     run = TestRun(
         suite_name=payload.suite_name,
         environment=payload.environment,
@@ -26,6 +37,9 @@ def create_run(db: Session, payload, report_zip: Optional[bytes] = None):
         html_report_html=payload.html_report_html,
         html_report_zip=report_zip,
         html_report_index_path=index_path,
+        ci_provider=ci.provider if ci else None,
+        ci_repository=ci.repository if ci else None,
+        ci_run_id=ci.run_id if ci else None,
     )
     db.add(run)
     db.flush()
@@ -160,6 +174,7 @@ def get_summary(db: Session):
                 'has_html_report_inline': bool(run.html_report_html),
                 'has_html_report_zip': bool(run.html_report_zip),
                 'html_report_index_path': run.html_report_index_path,
+                'ci': _ci_identity(run),
             }
         )
 
@@ -178,3 +193,43 @@ def get_summary(db: Session):
         'latest_runs': latest_runs,
         'generated_at': datetime.utcnow().isoformat(),
     }
+
+
+def upsert_triage_result(db: Session, payload) -> TriageResult:
+    values = payload.model_dump()
+    now = datetime.utcnow()
+    row = (
+        db.query(TriageResult)
+        .filter(
+            TriageResult.provider == payload.provider,
+            TriageResult.repository == payload.repository,
+            TriageResult.run_id == payload.run_id,
+        )
+        .first()
+    )
+    if row:
+        for key, value in values.items():
+            setattr(row, key, value)
+        row.updated_at = now
+    else:
+        row = TriageResult(**values, created_at=now, updated_at=now)
+        db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def get_triage_result(db: Session, provider: str, repository: str, run_id: str) -> Optional[TriageResult]:
+    return (
+        db.query(TriageResult)
+        .filter(
+            TriageResult.provider == provider,
+            TriageResult.repository == repository,
+            TriageResult.run_id == run_id,
+        )
+        .first()
+    )
+
+
+def list_triage_results(db: Session, limit: int = 20):
+    return db.query(TriageResult).order_by(TriageResult.updated_at.desc()).limit(limit).all()

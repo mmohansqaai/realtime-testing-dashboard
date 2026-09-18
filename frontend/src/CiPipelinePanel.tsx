@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { fetchJson, fetchJsonPost } from './apiClient'
+import TriagePanel from './TriagePanel'
 
 type CiConfig = {
   enabled: boolean
@@ -77,6 +78,14 @@ function stepClass(step: CiStep): string {
   return 'ci-step'
 }
 
+function parseGithubRunId(raw: string): number | null {
+  const trimmed = raw.trim()
+  if (!/^\d+$/.test(trimmed)) return null
+  const value = Number(trimmed)
+  if (!Number.isInteger(value) || value <= 0) return null
+  return value
+}
+
 export default function CiPipelinePanel({ onPipelineFinished }: Props) {
   const [config, setConfig] = useState<CiConfig | null>(null)
   const [workflows, setWorkflows] = useState<CiWorkflow[]>([])
@@ -86,6 +95,8 @@ export default function CiPipelinePanel({ onPipelineFinished }: Props) {
   const [activeRunId, setActiveRunId] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [triggering, setTriggering] = useState(false)
+  const [existingRunId, setExistingRunId] = useState('32837090794')
+  const [loadingExisting, setLoadingExisting] = useState(false)
   const finishedRef = useRef(false)
 
   const loadConfig = useCallback(async () => {
@@ -194,6 +205,29 @@ export default function CiPipelinePanel({ onPipelineFinished }: Props) {
     }
   }
 
+  const loadExistingRun = async () => {
+    const runId = parseGithubRunId(existingRunId)
+    if (!runId) {
+      setError('Enter a positive GitHub Actions run ID.')
+      return
+    }
+    setLoadingExisting(true)
+    setError(null)
+    finishedRef.current = false
+    try {
+      if (runId !== activeRunId) {
+        setFlow(null)
+        setActiveRunId(runId)
+      } else {
+        await refreshFlow(runId)
+      }
+    } catch (e) {
+      setError(formatCiError(e instanceof Error ? e.message : String(e)))
+    } finally {
+      setLoadingExisting(false)
+    }
+  }
+
   if (!config) {
     return (
       <section className="card ci-panel">
@@ -262,6 +296,19 @@ export default function CiPipelinePanel({ onPipelineFinished }: Props) {
         <button type="button" disabled={triggering || !workflowFile} onClick={() => void triggerPipeline()}>
           {triggering ? 'Starting…' : 'Run pipeline'}
         </button>
+        <label className="ci-field">
+          <span className="meta">Existing run ID</span>
+          <input
+            className="html-report-select"
+            inputMode="numeric"
+            value={existingRunId}
+            onChange={(e) => setExistingRunId(e.target.value)}
+            placeholder="32837090794"
+          />
+        </label>
+        <button type="button" disabled={loadingExisting || !existingRunId.trim()} onClick={() => void loadExistingRun()}>
+          {loadingExisting ? 'Loading…' : 'Load run'}
+        </button>
       </div>
 
       {error ? <p className="meta" style={{ color: 'var(--danger)' }}>{error}</p> : null}
@@ -301,6 +348,15 @@ export default function CiPipelinePanel({ onPipelineFinished }: Props) {
             </div>
           ))}
         </div>
+      ) : null}
+
+      {activeRunId && config.repo ? (
+        <TriagePanel
+          provider="github-actions"
+          repository={config.repo}
+          runId={String(activeRunId)}
+          pipelineComplete={flow?.status === 'completed' || flow?.status === 'cancelled'}
+        />
       ) : null}
     </section>
   )

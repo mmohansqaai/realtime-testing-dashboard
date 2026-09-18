@@ -129,20 +129,12 @@ function App() {
   }, [])
 
   useEffect(() => {
-    let cancelled = false
-    const run = async () => {
-      const ok = await loadSummary()
-      if (cancelled) return
-      if (ok) {
-        void loadConfig()
-        return
-      }
-    }
-    void run()
-    return () => {
-      cancelled = true
-    }
-  }, [loadSummary, loadConfig])
+    void loadConfig()
+  }, [loadConfig])
+
+  useEffect(() => {
+    void loadSummary()
+  }, [loadSummary])
 
   useEffect(() => {
     if (!summary) return

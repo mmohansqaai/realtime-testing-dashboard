@@ -5,7 +5,7 @@ from typing import Optional
 
 from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
@@ -295,6 +295,45 @@ async def ingest_github_actions_run_with_report(
 
     await manager.broadcast({'event': 'github_ingest', 'summary': repository.get_summary(db), 'run_id': run.id})
     return run
+
+
+@app.post('/api/triage/results', response_model=schemas.TriageResultResponse)
+async def upsert_triage_result(
+    payload: schemas.TriageResultWrite,
+    db: Session = Depends(get_db),
+    x_ingest_token: str = Header('', alias='X-Ingest-Token'),
+):
+    _require_ingest_token(x_ingest_token)
+    row = repository.upsert_triage_result(db, payload)
+    result = schemas.TriageResultResponse.model_validate(row)
+    await manager.broadcast(
+        {
+            'event': 'triage_updated',
+            'result': jsonable_encoder(result, by_alias=True),
+        }
+    )
+    return result
+
+
+@app.get('/api/triage/result', response_model=schemas.TriageResultResponse)
+def fetch_triage_result(
+    provider: str = Query(..., min_length=1),
+    ci_repository: str = Query(..., min_length=1, alias='repository'),
+    run_id: str = Query(..., alias='runId', min_length=1),
+    db: Session = Depends(get_db),
+):
+    row = repository.get_triage_result(db, provider=provider, repository=ci_repository, run_id=run_id)
+    if not row:
+        raise HTTPException(status_code=404, detail='Triage result not found')
+    return row
+
+
+@app.get('/api/triage/results', response_model=list[schemas.TriageResultResponse])
+def list_triage_results(
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    return repository.list_triage_results(db, limit=limit)
 
 
 @app.websocket('/ws')

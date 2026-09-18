@@ -1,0 +1,224 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { fetchJsonOr404 } from './apiClient'
+
+export type TriageState =
+  | 'NOT_STARTED'
+  | 'ANALYZING'
+  | 'COMPLETED'
+  | 'REVIEW_REQUIRED'
+  | 'FAILED_TO_ANALYZE'
+
+export type TriageResult = {
+  id: number
+  provider: string
+  repository: string
+  runId: string
+  triageState: TriageState
+  pipelineName?: string | null
+  pipelineStatus?: string | null
+  failedJob?: string | null
+  failedStep?: string | null
+  classification?: string | null
+  subtype?: string | null
+  confidence?: number | null
+  probableCause?: string | null
+  evidence?: unknown
+  recommendedAction?: string | null
+  humanReviewRequired?: boolean | null
+  analysisMode?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+type Props = {
+  provider: string
+  repository: string
+  runId: string
+  pipelineComplete: boolean
+}
+
+function evidenceItems(evidence: unknown): string[] {
+  if (evidence == null || evidence === '') return []
+  if (Array.isArray(evidence)) {
+    return evidence.map((item) => (typeof item === 'string' ? item : JSON.stringify(item))).filter(Boolean)
+  }
+  if (typeof evidence === 'string') return [evidence]
+  return [JSON.stringify(evidence)]
+}
+
+function stateClass(state: TriageState): string {
+  if (state === 'ANALYZING') return 'triage-state analyzing'
+  if (state === 'COMPLETED') return 'triage-state completed'
+  if (state === 'REVIEW_REQUIRED') return 'triage-state review'
+  if (state === 'FAILED_TO_ANALYZE') return 'triage-state failed'
+  return 'triage-state'
+}
+
+function shouldPoll(state: TriageState, pipelineComplete: boolean): boolean {
+  if (state === 'ANALYZING') return true
+  if (state === 'NOT_STARTED' && pipelineComplete) return true
+  return false
+}
+
+export default function TriagePanel({ provider, repository, runId, pipelineComplete }: Props) {
+  const [result, setResult] = useState<TriageResult | null>(null)
+  const [state, setState] = useState<TriageState>('NOT_STARTED')
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const generationRef = useRef(0)
+
+  const load = useCallback(async () => {
+    const generation = generationRef.current
+    setLoading(true)
+    try {
+      const params = new URLSearchParams({ provider, repository, runId })
+      const data = await fetchJsonOr404<TriageResult>(`/api/triage/result?${params.toString()}`, 25000)
+      if (generation !== generationRef.current) return
+      setError(null)
+      if (!data) {
+        setResult(null)
+        setState('NOT_STARTED')
+        return
+      }
+      setResult(data)
+      setState(data.triageState)
+    } catch (e) {
+      if (generation !== generationRef.current) return
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      if (generation === generationRef.current) {
+        setLoading(false)
+      }
+    }
+  }, [provider, repository, runId])
+
+  useEffect(() => {
+    generationRef.current += 1
+    setResult(null)
+    setState('NOT_STARTED')
+    setError(null)
+    void load()
+  }, [provider, repository, runId, load])
+
+  useEffect(() => {
+    if (error) return
+    if (!shouldPoll(state, pipelineComplete)) return
+    const id = window.setTimeout(() => {
+      void load()
+    }, 4000)
+    return () => window.clearTimeout(id)
+  }, [state, pipelineComplete, error, load, result?.updatedAt])
+
+  const showFullResult = state === 'COMPLETED' || state === 'REVIEW_REQUIRED'
+  const evidence = evidenceItems(result?.evidence)
+
+  return (
+    <div className="triage-panel">
+      <div className="triage-header">
+        <strong>CI Failure Triage</strong>
+        <span className={stateClass(state)}>{state.replaceAll('_', ' ')}</span>
+      </div>
+
+      {error ? (
+        <div className="triage-error">
+          <p className="meta" style={{ color: 'var(--warning)', marginBottom: 8 }}>
+            Could not refresh triage. The CI pipeline view is unchanged.
+          </p>
+          <p className="meta" style={{ marginBottom: 10 }}>{error}</p>
+          <button type="button" onClick={() => void load()}>
+            Retry
+          </button>
+        </div>
+      ) : null}
+
+      {!error && state === 'NOT_STARTED' ? (
+        <p className="meta">
+          {pipelineComplete ? 'Triage has not started' : 'Waiting for pipeline completion'}
+          {loading ? '…' : ''}
+        </p>
+      ) : null}
+
+      {!error && state === 'ANALYZING' ? (
+        <p className="meta triage-analyzing">Analyzing this CI execution… checking for an updated result every 4s.</p>
+      ) : null}
+
+      {state === 'FAILED_TO_ANALYZE' ? (
+        <div className="triage-failed">
+          <p className="meta" style={{ color: 'var(--danger)' }}>
+            Triage failed to analyze this execution.
+          </p>
+          {result?.probableCause ? <p className="meta">{result.probableCause}</p> : null}
+          {result?.recommendedAction ? <p className="meta">{result.recommendedAction}</p> : null}
+          {!error ? (
+            <button type="button" onClick={() => void load()}>
+              Retry
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {showFullResult && result ? (
+        <div className="triage-result">
+          {state === 'REVIEW_REQUIRED' || result.humanReviewRequired ? (
+            <div className="triage-review">Human review required</div>
+          ) : null}
+          <div className="triage-grid">
+            <div className="triage-field">
+              <div className="label">Classification</div>
+              <div>{result.classification || '—'}</div>
+            </div>
+            <div className="triage-field">
+              <div className="label">Subtype</div>
+              <div>{result.subtype || '—'}</div>
+            </div>
+            <div className="triage-field">
+              <div className="label">Confidence</div>
+              <div>{result.confidence == null ? '—' : `${result.confidence}%`}</div>
+            </div>
+            <div className="triage-field">
+              <div className="label">Analysis mode</div>
+              <div>{result.analysisMode || '—'}</div>
+            </div>
+            <div className="triage-field">
+              <div>Human Review Required: {result.humanReviewRequired ? 'Yes' : 'No'}</div>
+            </div>
+            <div className="triage-field">
+              <div className="label">Pipeline</div>
+              <div>
+                {result.pipelineName || '—'}
+                {result.pipelineStatus ? ` · ${result.pipelineStatus}` : ''}
+              </div>
+            </div>
+            <div className="triage-field">
+              <div className="label">Failed job / step</div>
+              <div>
+                {result.failedJob || '—'}
+                {result.failedStep ? ` / ${result.failedStep}` : ''}
+              </div>
+            </div>
+          </div>
+          <div className="triage-block">
+            <div className="label">Probable cause</div>
+            <p>{result.probableCause || '—'}</p>
+          </div>
+          <div className="triage-block">
+            <div className="label">Evidence</div>
+            {evidence.length > 0 ? (
+              <ul className="triage-evidence">
+                {evidence.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="meta">—</p>
+            )}
+          </div>
+          <div className="triage-block">
+            <div className="label">Recommended action</div>
+            <p>{result.recommendedAction || '—'}</p>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}

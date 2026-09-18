@@ -149,7 +149,7 @@ button {
 }
 
 @media (max-width: 900px) {
-  .kpi-grid, .grid.two {
+  .kpi-grid, .grid.two, .triage-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -310,3 +310,105 @@ button {
 }
 
 .ci-job-status.running { color: var(--warning); }
+
+.triage-panel {
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+
+.triage-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.triage-state {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.triage-state.analyzing {
+  color: var(--warning);
+  border-color: var(--warning);
+}
+
+.triage-state.completed {
+  color: var(--success);
+  border-color: var(--success);
+}
+
+.triage-state.review {
+  color: var(--warning);
+  border-color: var(--warning);
+}
+
+.triage-state.failed {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.triage-analyzing {
+  color: var(--warning);
+}
+
+.triage-review {
+  border: 1px solid var(--warning);
+  color: var(--warning);
+  background: var(--panel-soft);
+  padding: 10px 12px;
+  border-radius: 10px;
+  margin-bottom: 12px;
+  font-weight: 700;
+}
+
+.triage-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+  margin-bottom: 12px;
+}
+
+.triage-field .label,
+.triage-block .label {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-bottom: 4px;
+}
+
+.triage-block {
+  margin-top: 12px;
+}
+
+.triage-block p {
+  color: var(--text);
+}
+
+.triage-evidence {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: var(--text);
+}
+
+.triage-evidence li {
+  margin-bottom: 4px;
+}
+
+.triage-error,
+.triage-failed {
+  margin-bottom: 8px;
+}
+
+.triage-failed button,
+.triage-error button {
+  margin-top: 8px;
+}
