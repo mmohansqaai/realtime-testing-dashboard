@@ -338,7 +338,7 @@ code {
   border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
-  background: #fff;
+  background: #f6f0fb;
   min-height: 480px;
 }
 
@@ -347,7 +347,7 @@ code {
   width: 100%;
   min-height: 480px;
   border: 0;
-  background: #fff;
+  background: #f6f0fb;
   color-scheme: light;
 }
 

@@ -1,14 +1,50 @@
-"""Inject a dark theme into embedded HTML reports so they align with the dashboard UI."""
+"""Inject a light BayOne-aligned theme into embedded HTML reports."""
 
 from __future__ import annotations
 
 import re
 
-# Matches frontend :root in frontend/src/index.css
+# Matches the dashboard light palette (purple wash, dark text).
 _THEME_STYLE = """<style id="rttd-dashboard-theme">
-html{background:#0b1020!important;}
-body{background:#0b1020!important;color:#e7ecf6!important;font-family:Inter,system-ui,sans-serif!important;}
-</style>"""
+:root, html, html.dark, html.dark-mode, [data-color-mode="dark"] {
+  color-scheme: light !important;
+  --color-canvas-default: #f6f0fb !important;
+  --color-canvas-subtle: #efe6f8 !important;
+  --color-fg-default: #1b1328 !important;
+  --color-fg-muted: #5c5470 !important;
+  --color-border-default: #e0d4ef !important;
+  --color-accent-fg: #7b2cbf !important;
+  --color-pretty-paths: #7b2cbf !important;
+}
+html, body {
+  background: #f6f0fb !important;
+  color: #1b1328 !important;
+  color-scheme: light !important;
+}
+input, textarea, select {
+  background: #ffffff !important;
+  color: #1b1328 !important;
+  border-color: #e0d4ef !important;
+}
+@media (prefers-color-scheme: dark) {
+  :root, html, body {
+    color-scheme: light !important;
+    background: #f6f0fb !important;
+    color: #1b1328 !important;
+    --color-canvas-default: #f6f0fb !important;
+    --color-fg-default: #1b1328 !important;
+  }
+}
+</style>
+<script id="rttd-dashboard-theme-js">
+(function () {
+  try { localStorage.setItem('playwright-report-color-scheme', 'light'); } catch (e) {}
+  var root = document.documentElement;
+  root.classList.remove('dark', 'dark-mode');
+  root.dataset.colorMode = 'light';
+  root.style.colorScheme = 'light';
+})();
+</script>"""
 
 
 def inject_dashboard_theme(html: str) -> str:
