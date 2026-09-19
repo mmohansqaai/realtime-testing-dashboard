@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any, Optional
 
 import httpx
@@ -14,6 +15,24 @@ from .settings import (
     GITHUB_CI_WORKFLOW_FILE,
     github_ci_enabled,
 )
+
+
+_CACHE: dict[str, tuple[float, Any]] = {}
+
+
+def _cache_get(key: str) -> Any:
+    item = _CACHE.get(key)
+    if not item:
+        return None
+    expires, value = item
+    if expires < time.monotonic():
+        _CACHE.pop(key, None)
+        return None
+    return value
+
+
+def _cache_set(key: str, value: Any, ttl_seconds: float) -> None:
+    _CACHE[key] = (time.monotonic() + ttl_seconds, value)
 
 
 class GitHubCiError(Exception):
@@ -66,7 +85,7 @@ async def _request(
         except Exception:
             pass
         hint = ''
-        if response.status_code == 403:
+        if response.status_code == 403 and 'rate limit' not in detail.lower():
             hint = (
                 ' Regenerated classic PAT needs scopes repo + workflow. '
                 'Fine-grained PAT needs this repo and Actions = Read and write. '
@@ -89,6 +108,9 @@ def ci_config() -> dict[str, Any]:
 
 
 async def list_workflows() -> list[dict[str, Any]]:
+    cached = _cache_get('workflows')
+    if cached is not None:
+        return cached
     token, repo, _ = _require_ci()
     data = await _request('GET', f'/repos/{repo}/actions/workflows', token=token, params={'per_page': 30})
     workflows = []
@@ -101,6 +123,7 @@ async def list_workflows() -> list[dict[str, Any]]:
                 'state': wf.get('state'),
             }
         )
+    _cache_set('workflows', workflows, 600)
     return workflows
 
 
@@ -149,12 +172,22 @@ async def _find_latest_run(token: str, repo: str, workflow_file: str) -> Optiona
 async def list_recent_runs(*, limit: int = 10, workflow_file: Optional[str] = None) -> list[dict[str, Any]]:
     token, repo, default_wf = _require_ci()
     wf = workflow_file or default_wf
+    cache_key = f'runs:{wf}:{limit}'
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
     path = f'/repos/{repo}/actions/workflows/{wf}/runs' if wf else f'/repos/{repo}/actions/runs'
     data = await _request('GET', path, token=token, params={'per_page': min(limit, 30)})
-    return [_map_run_summary(r) for r in data.get('workflow_runs', [])]
+    runs = [_map_run_summary(r) for r in data.get('workflow_runs', [])]
+    _cache_set(cache_key, runs, 45)
+    return runs
 
 
 async def get_run_flow(run_id: int) -> dict[str, Any]:
+    cache_key = f'flow:{run_id}'
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
     token, repo, _ = _require_ci()
     run_data = await _request('GET', f'/repos/{repo}/actions/runs/{run_id}', token=token)
     jobs_data = await _request('GET', f'/repos/{repo}/actions/runs/{run_id}/jobs', token=token)
@@ -189,6 +222,8 @@ async def get_run_flow(run_id: int) -> dict[str, Any]:
     flow['event'] = run_data.get('event')
     flow['head_branch'] = run_data.get('head_branch')
     flow['head_sha'] = (run_data.get('head_sha') or '')[:7]
+    ttl = 600 if flow.get('status') in {'completed', 'cancelled'} else 8
+    _cache_set(cache_key, flow, ttl)
     return flow
 
 

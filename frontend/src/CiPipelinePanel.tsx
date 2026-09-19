@@ -182,28 +182,10 @@ export default function CiPipelinePanel({
   }, [loadConfig])
 
   useEffect(() => {
-    if (config?.enabled) {
+    if (config?.enabled && mode === 'testing') {
       void loadWorkflows()
     }
-  }, [config?.enabled, loadWorkflows])
-
-  useEffect(() => {
-    if (mode !== 'triage' || !config?.enabled) return
-    let cancelled = false
-    void (async () => {
-      try {
-        const data = await fetchJson<{ runs: CiRunSummary[] }>('/api/ci/runs?limit=20', 25000)
-        if (cancelled) return
-        const failed = data.runs.find((run) => run.conclusion === 'failure')
-        setLatestFailedRunId(failed?.id ?? null)
-      } catch {
-        if (!cancelled) setLatestFailedRunId(null)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [mode, config?.enabled])
+  }, [config?.enabled, loadWorkflows, mode])
 
   useEffect(() => {
     if (!selectedRunId || selectedRunId === activeRunId) return
