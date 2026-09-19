@@ -68,7 +68,6 @@ type Props = {
   onPipelineFinished?: () => void
   selectedRunId?: number | null
   onSelectedRunIdChange?: (runId: number) => void
-  onOpenTriage?: (runId: number) => void
   mode?: 'testing' | 'triage'
 }
 
@@ -115,7 +114,6 @@ export default function CiPipelinePanel({
   onPipelineFinished,
   selectedRunId = null,
   onSelectedRunIdChange,
-  onOpenTriage,
   mode = 'testing',
 }: Props) {
   const [config, setConfig] = useState<CiConfig | null>(null)
@@ -400,11 +398,6 @@ export default function CiPipelinePanel({
             }}
           >
             Load latest failed run
-          </button>
-        ) : null}
-        {mode === 'testing' && activeRunId && onOpenTriage ? (
-          <button type="button" className="app-tab-link" onClick={() => onOpenTriage(activeRunId)}>
-            Open triage
           </button>
         ) : null}
       </div>

@@ -269,7 +269,6 @@ function App() {
       mode={nav.tab}
       selectedRunId={nav.runId}
       onSelectedRunIdChange={(runId) => go(nav.tab, runId)}
-      onOpenTriage={(runId) => go('triage', runId)}
       onPipelineFinished={() => void loadSummary()}
     />
   )
