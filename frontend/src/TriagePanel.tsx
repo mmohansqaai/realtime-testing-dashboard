@@ -35,6 +35,7 @@ type Props = {
   repository: string
   runId: string
   pipelineComplete: boolean
+  pipelineConclusion?: string | null
 }
 
 function evidenceItems(evidence: unknown): string[] {
@@ -54,17 +55,34 @@ function stateClass(state: TriageState): string {
   return 'triage-state'
 }
 
-function shouldPoll(state: TriageState, pipelineComplete: boolean): boolean {
+function shouldPoll(state: TriageState, pipelineComplete: boolean, missCount: number): boolean {
   if (state === 'ANALYZING') return true
-  if (state === 'NOT_STARTED' && pipelineComplete) return true
+  if (state === 'NOT_STARTED' && pipelineComplete && missCount < 4) return true
   return false
 }
 
-export default function TriagePanel({ provider, repository, runId, pipelineComplete }: Props) {
+function notStartedCopy(pipelineComplete: boolean, pipelineConclusion?: string | null): string {
+  if (!pipelineComplete) {
+    return 'Waiting for the GitHub Actions run to finish. Triage is ingested after the pipeline completes.'
+  }
+  if (pipelineConclusion === 'success') {
+    return 'This GitHub run succeeded. There is no failure to triage, and no triage result was posted for this run ID.'
+  }
+  return 'No triage result has been posted for this run ID yet. This dashboard displays ingested results; it does not classify the pipeline itself.'
+}
+
+export default function TriagePanel({
+  provider,
+  repository,
+  runId,
+  pipelineComplete,
+  pipelineConclusion = null,
+}: Props) {
   const [result, setResult] = useState<TriageResult | null>(null)
   const [state, setState] = useState<TriageState>('NOT_STARTED')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [missCount, setMissCount] = useState(0)
   const generationRef = useRef(0)
 
   const load = useCallback(async () => {
@@ -78,10 +96,12 @@ export default function TriagePanel({ provider, repository, runId, pipelineCompl
       if (!data) {
         setResult(null)
         setState('NOT_STARTED')
+        setMissCount((count) => count + 1)
         return
       }
       setResult(data)
       setState(data.triageState)
+      setMissCount(0)
     } catch (e) {
       if (generation !== generationRef.current) return
       setError(e instanceof Error ? e.message : String(e))
@@ -97,17 +117,18 @@ export default function TriagePanel({ provider, repository, runId, pipelineCompl
     setResult(null)
     setState('NOT_STARTED')
     setError(null)
+    setMissCount(0)
     void load()
   }, [provider, repository, runId, load])
 
   useEffect(() => {
     if (error) return
-    if (!shouldPoll(state, pipelineComplete)) return
+    if (!shouldPoll(state, pipelineComplete, missCount)) return
     const id = window.setTimeout(() => {
       void load()
     }, 4000)
     return () => window.clearTimeout(id)
-  }, [state, pipelineComplete, error, load, result?.updatedAt])
+  }, [state, pipelineComplete, error, load, result?.updatedAt, missCount])
 
   const showFullResult = state === 'COMPLETED' || state === 'REVIEW_REQUIRED'
   const evidence = evidenceItems(result?.evidence)
@@ -133,8 +154,8 @@ export default function TriagePanel({ provider, repository, runId, pipelineCompl
 
       {!error && state === 'NOT_STARTED' ? (
         <p className="meta">
-          {pipelineComplete ? 'Triage has not started' : 'Waiting for pipeline completion'}
-          {loading ? '…' : ''}
+          {notStartedCopy(pipelineComplete, pipelineConclusion)}
+          {loading && missCount < 4 ? ' Checking again…' : ''}
         </p>
       ) : null}
 

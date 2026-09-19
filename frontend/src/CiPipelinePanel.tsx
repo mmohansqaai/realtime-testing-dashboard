@@ -355,6 +355,16 @@ export default function CiPipelinePanel({
 
       {error ? <p className="meta" style={{ color: 'var(--danger)' }}>{error}</p> : null}
 
+      {mode === 'triage' && activeRunId && config.repo ? (
+        <TriagePanel
+          provider="github-actions"
+          repository={config.repo}
+          runId={String(activeRunId)}
+          pipelineComplete={flow?.status === 'completed' || flow?.status === 'cancelled'}
+          pipelineConclusion={flow?.conclusion ?? null}
+        />
+      ) : null}
+
       {flow ? (
         <div className="ci-flow">
           <div className="ci-flow-header">
@@ -390,15 +400,6 @@ export default function CiPipelinePanel({
             </div>
           ))}
         </div>
-      ) : null}
-
-      {mode === 'triage' && activeRunId && config.repo ? (
-        <TriagePanel
-          provider="github-actions"
-          repository={config.repo}
-          runId={String(activeRunId)}
-          pipelineComplete={flow?.status === 'completed' || flow?.status === 'cancelled'}
-        />
       ) : null}
     </section>
   )
