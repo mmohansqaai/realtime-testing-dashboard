@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { fetchJson, fetchJsonPost } from './apiClient'
+import { ApiError, fetchJson, fetchJsonPost } from './apiClient'
 import TriagePanel from './TriagePanel'
 
 type CiConfig = {
@@ -83,6 +83,9 @@ function stepIcon(step: CiStep): string {
 }
 
 function formatCiError(message: string): string {
+  if (message.toLowerCase().includes('rate limit')) {
+    return 'GitHub API rate limit exceeded for this token. Wait until the limit resets, and avoid refreshing this page — retries make it worse.'
+  }
   if (message.includes('403') || message.toLowerCase().includes('not accessible by personal access token')) {
     return [
       'GitHub rejected the token (403).',
@@ -92,6 +95,12 @@ function formatCiError(message: string): string {
     ].join(' ')
   }
   return message
+}
+
+function shouldRetryGithub(error: unknown): boolean {
+  if (error instanceof ApiError && (error.status === 401 || error.status === 403)) return false
+  const message = error instanceof Error ? error.message : String(error)
+  return !message.toLowerCase().includes('rate limit')
 }
 
 function stepClass(step: CiStep): string {
@@ -187,9 +196,6 @@ export default function CiPipelinePanel({
         if (cancelled) return
         const failed = data.runs.find((run) => run.conclusion === 'failure')
         setLatestFailedRunId(failed?.id ?? null)
-        if (!selectedRunId && !activeRunId && failed?.id) {
-          selectRun(failed.id)
-        }
       } catch {
         if (!cancelled) setLatestFailedRunId(null)
       }
@@ -197,7 +203,7 @@ export default function CiPipelinePanel({
     return () => {
       cancelled = true
     }
-  }, [mode, config?.enabled, selectedRunId, activeRunId, selectRun])
+  }, [mode, config?.enabled])
 
   useEffect(() => {
     if (!selectedRunId || selectedRunId === activeRunId) return
@@ -227,8 +233,10 @@ export default function CiPipelinePanel({
         }
       } catch (e) {
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : String(e))
-          window.setTimeout(poll, 6000)
+          setError(formatCiError(e instanceof Error ? e.message : String(e)))
+          if (shouldRetryGithub(e)) {
+            window.setTimeout(poll, 6000)
+          }
         }
       }
     }
@@ -267,6 +275,25 @@ export default function CiPipelinePanel({
       setError(formatCiError(e instanceof Error ? e.message : String(e)))
     } finally {
       setTriggering(false)
+    }
+  }
+
+  const loadLatestFailedRun = async () => {
+    setLoadingExisting(true)
+    setError(null)
+    try {
+      const data = await fetchJson<{ runs: CiRunSummary[] }>('/api/ci/runs?limit=20', 25000)
+      const failed = data.runs.find((run) => run.conclusion === 'failure')
+      if (!failed?.id) {
+        setError('No failed GitHub Actions run found for this workflow.')
+        return
+      }
+      setLatestFailedRunId(failed.id)
+      selectRun(failed.id)
+    } catch (e) {
+      setError(formatCiError(e instanceof Error ? e.message : String(e)))
+    } finally {
+      setLoadingExisting(false)
     }
   }
 
@@ -388,19 +415,14 @@ export default function CiPipelinePanel({
             <button type="button" disabled={loadingExisting || !existingRunId.trim()} onClick={() => void loadExistingRun()}>
               {loadingExisting ? 'Loading…' : 'Load run'}
             </button>
-            {latestFailedRunId ? (
-              <button
-                type="button"
-                className="app-tab-link"
-                disabled={loadingExisting || latestFailedRunId === activeRunId}
-                onClick={() => {
-                  setExistingRunId(String(latestFailedRunId))
-                  selectRun(latestFailedRunId)
-                }}
-              >
-                Load latest failed run
-              </button>
-            ) : null}
+            <button
+              type="button"
+              className="app-tab-link"
+              disabled={loadingExisting}
+              onClick={() => void loadLatestFailedRun()}
+            >
+              {loadingExisting ? 'Loading…' : 'Load latest failed run'}
+            </button>
           </>
         )}
       </div>
