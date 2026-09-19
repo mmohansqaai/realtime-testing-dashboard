@@ -275,6 +275,15 @@ function App() {
   )
 
   return (
+    <div className="app-shell">
+      <div className="topbar">
+        <div className="topbar-inner">
+          <a className="brand" href="https://bayone.com/" target="_blank" rel="noreferrer">
+            <img src="/bayone-logo.png" alt="BayOne" className="brand-logo" />
+          </a>
+          <div className="topbar-tagline">#TheFutureWorksHere</div>
+        </div>
+      </div>
     <div className="container">
       {fetchError && summary ? (
         <section className="card" style={{ marginBottom: 16, borderColor: 'var(--warning, #a83)' }}>
@@ -291,18 +300,19 @@ function App() {
           <p className="meta" style={{ marginBottom: 0 }}>{wsError}</p>
         </section>
       ) : null}
-      <header>
+      <header className="page-header">
         <div>
+          <p className="eyebrow">Quality Engineering</p>
           <h1>
-            {nav.tab === 'triage' ? 'Real-Time Triage Dashboard' : 'Real-Time Testing Dashboard'}
+            {nav.tab === 'triage' ? 'CI Failure Triage' : 'Real-Time Testing'}
           </h1>
           <p>
             {nav.tab === 'triage'
-              ? 'CI Failure Triage results for GitHub Actions executions'
-              : 'Open-source QA observability dashboard for live execution monitoring'}
+              ? 'Correlated GitHub Actions results for Quality Engineering review'
+              : 'Live execution monitoring for Quality Engineering'}
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div className="header-pills">
           <div className="pill">Data: {dataSource}</div>
           <div className="pill" title="REST + WS target">API: {getApiBaseUrl() || 'same-origin'}</div>
           <div className={`pill ${connectionStatus === 'Live' ? 'status-live' : ''}`}>{connectionStatus}</div>
@@ -315,14 +325,14 @@ function App() {
           className={`app-tab ${nav.tab === 'testing' ? 'active' : ''}`}
           onClick={() => go('testing', nav.runId)}
         >
-          realtime-testing-dashboard
+          Testing
         </button>
         <button
           type="button"
           className={`app-tab ${nav.tab === 'triage' ? 'active' : ''}`}
           onClick={() => go('triage', nav.runId)}
         >
-          realtime-triage-dashboard
+          Triage
         </button>
       </nav>
 
@@ -524,6 +534,11 @@ function App() {
         ) : null}
         </>
       ) : null}
+    </div>
+      <footer className="site-footer">
+        <span>BayOne Solutions</span>
+        <span>Quality Engineering · All rights reserved</span>
+      </footer>
     </div>
   )
 }
