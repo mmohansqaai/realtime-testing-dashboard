@@ -32,6 +32,13 @@ type CiJob = {
   steps: CiStep[]
 }
 
+type CiRunSummary = {
+  id: number
+  name: string
+  status: string
+  conclusion: string | null
+}
+
 type CiRunFlow = {
   id: number
   name: string
@@ -41,6 +48,20 @@ type CiRunFlow = {
   head_branch?: string | null
   head_sha?: string | null
   jobs: CiJob[]
+}
+
+function firstFailedStep(flow: CiRunFlow | null): { job: string; step: string } | null {
+  if (!flow) return null
+  for (const job of flow.jobs) {
+    const step = job.steps.find((item) => item.conclusion === 'failure')
+    if (step) {
+      return { job: job.name, step: step.name || `Step ${step.number}` }
+    }
+    if (job.conclusion === 'failure') {
+      return { job: job.name, step: '' }
+    }
+  }
+  return null
 }
 
 type Props = {
@@ -107,13 +128,14 @@ export default function CiPipelinePanel({
   const [triggering, setTriggering] = useState(false)
   const [existingRunId, setExistingRunId] = useState(selectedRunId ? String(selectedRunId) : '32837090794')
   const [loadingExisting, setLoadingExisting] = useState(false)
+  const [latestFailedRunId, setLatestFailedRunId] = useState<number | null>(null)
   const finishedRef = useRef(false)
 
-  const selectRun = (runId: number) => {
+  const selectRun = useCallback((runId: number) => {
     setActiveRunId(runId)
     setExistingRunId(String(runId))
     onSelectedRunIdChange?.(runId)
-  }
+  }, [onSelectedRunIdChange])
 
   const loadConfig = useCallback(async () => {
     try {
@@ -157,6 +179,27 @@ export default function CiPipelinePanel({
       void loadWorkflows()
     }
   }, [config?.enabled, loadWorkflows])
+
+  useEffect(() => {
+    if (mode !== 'triage' || !config?.enabled) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const data = await fetchJson<{ runs: CiRunSummary[] }>('/api/ci/runs?limit=20', 25000)
+        if (cancelled) return
+        const failed = data.runs.find((run) => run.conclusion === 'failure')
+        setLatestFailedRunId(failed?.id ?? null)
+        if (!selectedRunId && !activeRunId && failed?.id) {
+          selectRun(failed.id)
+        }
+      } catch {
+        if (!cancelled) setLatestFailedRunId(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [mode, config?.enabled, selectedRunId, activeRunId, selectRun])
 
   useEffect(() => {
     if (!selectedRunId || selectedRunId === activeRunId) return
@@ -346,6 +389,19 @@ export default function CiPipelinePanel({
         <button type="button" disabled={loadingExisting || !existingRunId.trim()} onClick={() => void loadExistingRun()}>
           {loadingExisting ? 'Loading…' : 'Load run'}
         </button>
+        {mode === 'triage' && latestFailedRunId ? (
+          <button
+            type="button"
+            className="app-tab-link"
+            disabled={loadingExisting || latestFailedRunId === activeRunId}
+            onClick={() => {
+              setExistingRunId(String(latestFailedRunId))
+              selectRun(latestFailedRunId)
+            }}
+          >
+            Load latest failed run
+          </button>
+        ) : null}
         {mode === 'testing' && activeRunId && onOpenTriage ? (
           <button type="button" className="app-tab-link" onClick={() => onOpenTriage(activeRunId)}>
             Open triage
@@ -355,6 +411,13 @@ export default function CiPipelinePanel({
 
       {error ? <p className="meta" style={{ color: 'var(--danger)' }}>{error}</p> : null}
 
+      {mode === 'triage' && latestFailedRunId && latestFailedRunId !== activeRunId ? (
+        <p className="meta" style={{ color: 'var(--danger)' }}>
+          GitHub has a newer failed Playwright run ({latestFailedRunId}). This page is showing a different run.
+          Use <strong>Load latest failed run</strong>.
+        </p>
+      ) : null}
+
       {mode === 'triage' && activeRunId && config.repo ? (
         <TriagePanel
           provider="github-actions"
@@ -362,6 +425,8 @@ export default function CiPipelinePanel({
           runId={String(activeRunId)}
           pipelineComplete={flow?.status === 'completed' || flow?.status === 'cancelled'}
           pipelineConclusion={flow?.conclusion ?? null}
+          githubFailedJob={firstFailedStep(flow)?.job ?? null}
+          githubFailedStep={firstFailedStep(flow)?.step ?? null}
         />
       ) : null}
 

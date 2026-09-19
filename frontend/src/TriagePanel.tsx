@@ -36,6 +36,8 @@ type Props = {
   runId: string
   pipelineComplete: boolean
   pipelineConclusion?: string | null
+  githubFailedJob?: string | null
+  githubFailedStep?: string | null
 }
 
 function evidenceItems(evidence: unknown): string[] {
@@ -61,14 +63,23 @@ function shouldPoll(state: TriageState, pipelineComplete: boolean, missCount: nu
   return false
 }
 
-function notStartedCopy(pipelineComplete: boolean, pipelineConclusion?: string | null): string {
+function notStartedCopy(
+  pipelineComplete: boolean,
+  pipelineConclusion?: string | null,
+  failedJob?: string | null,
+  failedStep?: string | null,
+): string {
   if (!pipelineComplete) {
     return 'Waiting for the GitHub Actions run to finish. Triage is ingested after the pipeline completes.'
   }
   if (pipelineConclusion === 'success') {
     return 'This GitHub run succeeded. There is no failure to triage, and no triage result was posted for this run ID.'
   }
-  return 'No triage result has been posted for this run ID yet. This dashboard displays ingested results; it does not classify the pipeline itself.'
+  const where = [failedJob, failedStep].filter(Boolean).join(' / ')
+  if (where) {
+    return `GitHub reports this run failed at ${where}. Classification appears here only after a triage result is posted for this run ID. This dashboard does not classify failures itself.`
+  }
+  return 'This GitHub run failed, but no triage result has been posted for this run ID. This dashboard displays ingested results; it does not classify the pipeline itself.'
 }
 
 export default function TriagePanel({
@@ -77,6 +88,8 @@ export default function TriagePanel({
   runId,
   pipelineComplete,
   pipelineConclusion = null,
+  githubFailedJob = null,
+  githubFailedStep = null,
 }: Props) {
   const [result, setResult] = useState<TriageResult | null>(null)
   const [state, setState] = useState<TriageState>('NOT_STARTED')
@@ -154,7 +167,7 @@ export default function TriagePanel({
 
       {!error && state === 'NOT_STARTED' ? (
         <p className="meta">
-          {notStartedCopy(pipelineComplete, pipelineConclusion)}
+          {notStartedCopy(pipelineComplete, pipelineConclusion, githubFailedJob, githubFailedStep)}
           {loading && missCount < 4 ? ' Checking again…' : ''}
         </p>
       ) : null}
