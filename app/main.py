@@ -13,7 +13,7 @@ from pydantic import ValidationError
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
-from . import github_ci, repository, schemas
+from . import github_ci, github_triage, repository, schemas
 from .github_ci import GitHubCiError
 from .html_theme import inject_dashboard_theme, inject_dashboard_theme_bytes
 from .report_zip import ReportZipError, read_member
@@ -318,16 +318,20 @@ async def upsert_triage_result(
 
 
 @app.get('/api/triage/result', response_model=schemas.TriageResultResponse)
-def fetch_triage_result(
+async def fetch_triage_result(
     provider: str = Query(..., min_length=1),
     ci_repository: str = Query(..., min_length=1, alias='repository'),
     run_id: str = Query(..., alias='runId', min_length=1),
     db: Session = Depends(get_db),
 ):
     row = repository.get_triage_result(db, provider=provider, repository=ci_repository, run_id=run_id)
-    if not row:
-        raise HTTPException(status_code=404, detail='Triage result not found')
-    return row
+    if row:
+        return row
+    if provider.strip().lower() in {'github-actions', 'github'}:
+        derived = await github_triage.derive_github_triage(ci_repository, run_id)
+        if derived:
+            return derived
+    raise HTTPException(status_code=404, detail='Triage result not found')
 
 
 @app.get('/api/triage/results', response_model=list[schemas.TriageResultResponse])
