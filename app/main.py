@@ -117,8 +117,10 @@ async def ci_trigger(payload: schemas.CiTriggerRequest):
 
 @app.get('/api/summary')
 def summary(response: Response, db: Session = Depends(get_db)):
-    data = repository.get_summary(db)
-    # Helps verify in DevTools → Network → Headers that this JSON is from the real API + current mode.
+    try:
+        data = repository.get_summary(db)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)[:800]) from exc
     response.headers['X-Data-Source'] = DATA_SOURCE
     return data
 

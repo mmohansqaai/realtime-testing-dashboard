@@ -1,6 +1,6 @@
 from datetime import datetime
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, JSON, LargeBinary, String, Text, UniqueConstraint
-from sqlalchemy.orm import relationship
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, JSON, LargeBinary, String, Text, UniqueConstraint, inspect
+from sqlalchemy.orm import deferred, relationship
 
 from .database import Base
 
@@ -20,9 +20,8 @@ class TestRun(Base):
     completed_at = Column(DateTime, nullable=True)
     # Optional CI HTML report: public URL and/or single-file HTML body (served via GET /api/runs/{id}/html-report)
     html_report_url = Column(String, nullable=True)
-    html_report_html = Column(Text, nullable=True)
-    # Zipped multi-file HTML report (e.g. Playwright playwright-report/ folder).
-    html_report_zip = Column(LargeBinary, nullable=True)
+    html_report_html = deferred(Column(Text, nullable=True))
+    html_report_zip = deferred(Column(LargeBinary, nullable=True))
     html_report_index_path = Column(String, nullable=True)
     # Optional correlation to an external CI execution (not unique: one run may publish multiple result sets).
     ci_provider = Column(String, nullable=True)
@@ -43,11 +42,14 @@ class TestRun(Base):
 
     @property
     def has_html_report_inline(self) -> bool:
+        state = inspect(self)
+        if 'html_report_html' in state.unloaded:
+            return False
         return bool(self.html_report_html)
 
     @property
     def has_html_report_zip(self) -> bool:
-        return bool(self.html_report_zip)
+        return bool(self.html_report_index_path)
 
 
 class TestCaseResult(Base):

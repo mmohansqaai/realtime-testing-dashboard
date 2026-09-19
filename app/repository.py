@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import case, func
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, undefer
 
 from .models import TestCaseResult, TestRun, TriageResult
 from .settings import DATA_SOURCE
@@ -66,7 +66,11 @@ def create_run(db: Session, payload, report_zip: Optional[bytes] = None):
 def get_run(db: Session, run_id: int):
     return (
         db.query(TestRun)
-        .options(joinedload(TestRun.test_cases))
+        .options(
+            joinedload(TestRun.test_cases),
+            undefer(TestRun.html_report_zip),
+            undefer(TestRun.html_report_html),
+        )
         .filter(TestRun.id == run_id)
         .first()
     )
@@ -154,8 +158,18 @@ def get_summary(db: Session):
         for module, passed, failed, total in modules
     ]
 
+    runs = get_runs(db, limit=6)
+    run_ids = [run.id for run in runs]
+    inline_ids: set[int] = set()
+    if run_ids:
+        inline_ids = {
+            row[0]
+            for row in db.query(TestRun.id)
+            .filter(TestRun.id.in_(run_ids), TestRun.html_report_html.isnot(None))
+            .all()
+        }
     latest_runs = []
-    for run in get_runs(db, limit=6):
+    for run in runs:
         passed = len([tc for tc in run.test_cases if tc.status == 'PASSED'])
         failed = len([tc for tc in run.test_cases if tc.status == 'FAILED'])
         latest_runs.append(
@@ -171,8 +185,8 @@ def get_summary(db: Session):
                 'failed': failed,
                 'total': len(run.test_cases),
                 'html_report_url': run.html_report_url,
-                'has_html_report_inline': bool(run.html_report_html),
-                'has_html_report_zip': bool(run.html_report_zip),
+                'has_html_report_inline': run.id in inline_ids,
+                'has_html_report_zip': bool(run.html_report_index_path),
                 'html_report_index_path': run.html_report_index_path,
                 'ci': _ci_identity(run),
             }
