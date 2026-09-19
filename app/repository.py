@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Dict, Optional
 
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session, joinedload, undefer
@@ -158,37 +158,62 @@ def get_summary(db: Session):
         for module, passed, failed, total in modules
     ]
 
-    runs = get_runs(db, limit=6)
-    run_ids = [run.id for run in runs]
-    inline_ids: set[int] = set()
+    run_q = db.query(
+        TestRun.id,
+        TestRun.suite_name,
+        TestRun.environment,
+        TestRun.build_version,
+        TestRun.status,
+        TestRun.started_at,
+        TestRun.completed_at,
+        TestRun.html_report_url,
+        TestRun.html_report_index_path,
+    )
+    if DATA_SOURCE == 'github':
+        run_q = run_q.order_by(
+            case((TestRun.environment == 'CI', 0), else_=1),
+            TestRun.started_at.desc(),
+        )
+    else:
+        run_q = run_q.order_by(TestRun.started_at.desc())
+    run_rows = run_q.limit(6).all()
+    run_ids = [row.id for row in run_rows]
+
+    case_stats: Dict[int, Dict[str, int]] = {run_id: {'passed': 0, 'failed': 0, 'total': 0} for run_id in run_ids}
     if run_ids:
-        inline_ids = {
-            row[0]
-            for row in db.query(TestRun.id)
-            .filter(TestRun.id.in_(run_ids), TestRun.html_report_html.isnot(None))
+        for run_id, status, count in (
+            db.query(TestCaseResult.run_id, TestCaseResult.status, func.count(TestCaseResult.id))
+            .filter(TestCaseResult.run_id.in_(run_ids))
+            .group_by(TestCaseResult.run_id, TestCaseResult.status)
             .all()
-        }
+        ):
+            stats = case_stats[run_id]
+            stats['total'] += int(count or 0)
+            if status == 'PASSED':
+                stats['passed'] += int(count or 0)
+            elif status == 'FAILED':
+                stats['failed'] += int(count or 0)
+
     latest_runs = []
-    for run in runs:
-        passed = len([tc for tc in run.test_cases if tc.status == 'PASSED'])
-        failed = len([tc for tc in run.test_cases if tc.status == 'FAILED'])
+    for row in run_rows:
+        stats = case_stats.get(row.id, {'passed': 0, 'failed': 0, 'total': 0})
         latest_runs.append(
             {
-                'id': run.id,
-                'suite_name': run.suite_name,
-                'environment': run.environment,
-                'build_version': run.build_version,
-                'status': run.status,
-                'started_at': run.started_at.isoformat(),
-                'completed_at': run.completed_at.isoformat() if run.completed_at else None,
-                'passed': passed,
-                'failed': failed,
-                'total': len(run.test_cases),
-                'html_report_url': run.html_report_url,
-                'has_html_report_inline': run.id in inline_ids,
-                'has_html_report_zip': bool(run.html_report_index_path),
-                'html_report_index_path': run.html_report_index_path,
-                'ci': _ci_identity(run),
+                'id': row.id,
+                'suite_name': row.suite_name,
+                'environment': row.environment,
+                'build_version': row.build_version,
+                'status': row.status,
+                'started_at': row.started_at.isoformat() if row.started_at else None,
+                'completed_at': row.completed_at.isoformat() if row.completed_at else None,
+                'passed': stats['passed'],
+                'failed': stats['failed'],
+                'total': stats['total'],
+                'html_report_url': row.html_report_url,
+                'has_html_report_inline': False,
+                'has_html_report_zip': bool(row.html_report_index_path),
+                'html_report_index_path': row.html_report_index_path,
+                'ci': None,
             }
         )
 
