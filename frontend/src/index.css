@@ -38,6 +38,35 @@ header {
   gap: 16px;
 }
 
+.app-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.app-tab {
+  margin-top: 0;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+
+.app-tab.active {
+  background: var(--panel);
+  color: var(--text);
+  border-color: var(--info);
+}
+
+.app-tab-link {
+  margin-top: 0;
+  background: transparent;
+  color: var(--info);
+  border: 1px solid var(--info);
+}
+
 h1 { margin: 0 0 6px; }
 p { color: var(--muted); margin: 0; }
 

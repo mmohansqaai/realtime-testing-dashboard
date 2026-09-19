@@ -45,6 +45,10 @@ type CiRunFlow = {
 
 type Props = {
   onPipelineFinished?: () => void
+  selectedRunId?: number | null
+  onSelectedRunIdChange?: (runId: number) => void
+  onOpenTriage?: (runId: number) => void
+  mode?: 'testing' | 'triage'
 }
 
 function stepIcon(step: CiStep): string {
@@ -86,18 +90,30 @@ function parseGithubRunId(raw: string): number | null {
   return value
 }
 
-export default function CiPipelinePanel({ onPipelineFinished }: Props) {
+export default function CiPipelinePanel({
+  onPipelineFinished,
+  selectedRunId = null,
+  onSelectedRunIdChange,
+  onOpenTriage,
+  mode = 'testing',
+}: Props) {
   const [config, setConfig] = useState<CiConfig | null>(null)
   const [workflows, setWorkflows] = useState<CiWorkflow[]>([])
   const [workflowFile, setWorkflowFile] = useState('')
   const [ref, setRef] = useState('main')
   const [flow, setFlow] = useState<CiRunFlow | null>(null)
-  const [activeRunId, setActiveRunId] = useState<number | null>(null)
+  const [activeRunId, setActiveRunId] = useState<number | null>(selectedRunId)
   const [error, setError] = useState<string | null>(null)
   const [triggering, setTriggering] = useState(false)
-  const [existingRunId, setExistingRunId] = useState('32837090794')
+  const [existingRunId, setExistingRunId] = useState(selectedRunId ? String(selectedRunId) : '32837090794')
   const [loadingExisting, setLoadingExisting] = useState(false)
   const finishedRef = useRef(false)
+
+  const selectRun = (runId: number) => {
+    setActiveRunId(runId)
+    setExistingRunId(String(runId))
+    onSelectedRunIdChange?.(runId)
+  }
 
   const loadConfig = useCallback(async () => {
     try {
@@ -141,6 +157,14 @@ export default function CiPipelinePanel({ onPipelineFinished }: Props) {
       void loadWorkflows()
     }
   }, [config?.enabled, loadWorkflows])
+
+  useEffect(() => {
+    if (!selectedRunId || selectedRunId === activeRunId) return
+    finishedRef.current = false
+    setFlow(null)
+    setActiveRunId(selectedRunId)
+    setExistingRunId(String(selectedRunId))
+  }, [selectedRunId, activeRunId])
 
   useEffect(() => {
     if (!activeRunId) return
@@ -189,11 +213,11 @@ export default function CiPipelinePanel({ onPipelineFinished }: Props) {
         workflow_file: workflowFile || undefined,
       })
       if (result.run_id) {
-        setActiveRunId(result.run_id)
+        selectRun(result.run_id)
       } else {
         const recent = await fetchJson<{ runs: Array<{ id: number }> }>('/api/ci/runs?limit=1', 25000)
         if (recent.runs[0]?.id) {
-          setActiveRunId(recent.runs[0].id)
+          selectRun(recent.runs[0].id)
         } else {
           setError('Pipeline started on GitHub; open the Actions tab to track the run.')
         }
@@ -217,7 +241,7 @@ export default function CiPipelinePanel({ onPipelineFinished }: Props) {
     try {
       if (runId !== activeRunId) {
         setFlow(null)
-        setActiveRunId(runId)
+        selectRun(runId)
       } else {
         await refreshFlow(runId)
       }
@@ -231,7 +255,7 @@ export default function CiPipelinePanel({ onPipelineFinished }: Props) {
   if (!config) {
     return (
       <section className="card ci-panel">
-        <div className="card-title">CI pipeline control</div>
+        <div className="card-title">{mode === 'triage' ? 'CI execution' : 'CI pipeline control'}</div>
         <p className="meta">Loading CI configuration…</p>
       </section>
     )
@@ -262,40 +286,53 @@ export default function CiPipelinePanel({ onPipelineFinished }: Props) {
 
   return (
     <section className="card ci-panel">
-      <div className="card-title">CI pipeline control</div>
+      <div className="card-title">{mode === 'triage' ? 'CI execution' : 'CI pipeline control'}</div>
       <p className="meta" style={{ marginTop: 0 }}>
-        Trigger <strong>{config.repo}</strong> on GitHub Actions and watch job/step progress here.
+        {mode === 'triage' ? (
+          <>
+            Load a GitHub Actions run for <strong>{config.repo}</strong>, then review the correlated CI Failure Triage
+            result.
+          </>
+        ) : (
+          <>
+            Trigger <strong>{config.repo}</strong> on GitHub Actions and watch job/step progress here.
+          </>
+        )}
       </p>
 
       <div className="ci-controls">
-        <label className="ci-field">
-          <span className="meta">Workflow file</span>
-          <select
-            className="html-report-select"
-            value={workflowFile}
-            onChange={(e) => setWorkflowFile(e.target.value)}
-          >
-            {workflows.length === 0 ? (
-              <option value={workflowFile}>{workflowFile || 'playwright.yml'}</option>
-            ) : (
-              workflows.map((wf) => {
-                const file = (wf.path || '').replace(/^\.github\/workflows\//, '')
-                return (
-                  <option key={wf.id} value={file}>
-                    {wf.name} ({file})
-                  </option>
-                )
-              })
-            )}
-          </select>
-        </label>
-        <label className="ci-field">
-          <span className="meta">Branch (ref)</span>
-          <input className="html-report-select" value={ref} onChange={(e) => setRef(e.target.value)} />
-        </label>
-        <button type="button" disabled={triggering || !workflowFile} onClick={() => void triggerPipeline()}>
-          {triggering ? 'Starting…' : 'Run pipeline'}
-        </button>
+        {mode === 'testing' ? (
+          <>
+            <label className="ci-field">
+              <span className="meta">Workflow file</span>
+              <select
+                className="html-report-select"
+                value={workflowFile}
+                onChange={(e) => setWorkflowFile(e.target.value)}
+              >
+                {workflows.length === 0 ? (
+                  <option value={workflowFile}>{workflowFile || 'playwright.yml'}</option>
+                ) : (
+                  workflows.map((wf) => {
+                    const file = (wf.path || '').replace(/^\.github\/workflows\//, '')
+                    return (
+                      <option key={wf.id} value={file}>
+                        {wf.name} ({file})
+                      </option>
+                    )
+                  })
+                )}
+              </select>
+            </label>
+            <label className="ci-field">
+              <span className="meta">Branch (ref)</span>
+              <input className="html-report-select" value={ref} onChange={(e) => setRef(e.target.value)} />
+            </label>
+            <button type="button" disabled={triggering || !workflowFile} onClick={() => void triggerPipeline()}>
+              {triggering ? 'Starting…' : 'Run pipeline'}
+            </button>
+          </>
+        ) : null}
         <label className="ci-field">
           <span className="meta">Existing run ID</span>
           <input
@@ -309,6 +346,11 @@ export default function CiPipelinePanel({ onPipelineFinished }: Props) {
         <button type="button" disabled={loadingExisting || !existingRunId.trim()} onClick={() => void loadExistingRun()}>
           {loadingExisting ? 'Loading…' : 'Load run'}
         </button>
+        {mode === 'testing' && activeRunId && onOpenTriage ? (
+          <button type="button" className="app-tab-link" onClick={() => onOpenTriage(activeRunId)}>
+            Open triage
+          </button>
+        ) : null}
       </div>
 
       {error ? <p className="meta" style={{ color: 'var(--danger)' }}>{error}</p> : null}
@@ -350,7 +392,7 @@ export default function CiPipelinePanel({ onPipelineFinished }: Props) {
         </div>
       ) : null}
 
-      {activeRunId && config.repo ? (
+      {mode === 'triage' && activeRunId && config.repo ? (
         <TriagePanel
           provider="github-actions"
           repository={config.repo}

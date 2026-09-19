@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import CiPipelinePanel from './CiPipelinePanel'
 import { DEFAULT_PROD_API, FETCH_TIMEOUT_MS, apiUrl, fetchJson, getApiBaseUrl } from './apiClient'
+import { readLocation, writeLocation, type DashboardTab } from './navigation'
 
 type Summary = {
   totals: {
@@ -48,6 +49,10 @@ function getWsBaseUrl(): string {
   return getApiBaseUrl() || DEFAULT_PROD_API
 }
 
+function restApiOrigin(): string {
+  return getApiBaseUrl() || window.location.origin
+}
+
 function reportViewerUrl(run: {
   id: number
   html_report_url?: string | null
@@ -93,6 +98,19 @@ function App() {
   const reconnectTimerRef = useRef<number | null>(null)
   const [dataSource, setDataSource] = useState<string>('unknown')
   const [selectedReportRunId, setSelectedReportRunId] = useState<number | null>(null)
+  const [nav, setNav] = useState(() => readLocation())
+
+  const go = useCallback((tab: DashboardTab, runId: number | null = nav.runId) => {
+    if (tab === nav.tab && runId === nav.runId) return
+    writeLocation(tab, runId)
+    setNav({ tab, runId })
+  }, [nav.tab, nav.runId])
+
+  useEffect(() => {
+    const onPop = () => setNav(readLocation())
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
 
   const loadInFlight = useRef(false)
   const apiWokeRef = useRef(false)
@@ -246,42 +264,19 @@ function App() {
 
   const reportOpenHref = selectedReportRun ? reportViewerUrl(selectedReportRun) : null
 
-  if (!summary && fetchError) {
-    return (
-      <div className="container">
-        <header>
-          <h1>Real-Time Testing Dashboard</h1>
-          <p>Could not load summary from the API.</p>
-        </header>
-        <section className="card" style={{ borderColor: 'var(--danger, #c44)' }}>
-          <div className="card-title">Connection error</div>
-          <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{fetchError}</pre>
-          <p className="meta">
-            The UI calls Render directly:{' '}
-            <a href={`${getApiBaseUrl() || DEFAULT_PROD_API}/api/health`} target="_blank" rel="noreferrer">
-              {getApiBaseUrl() || DEFAULT_PROD_API}/api/health
-            </a>
-            . First load after idle can take ~50s. Wait, then Retry. Redeploy Render after this CORS update.
-          </p>
-          <button type="button" onClick={() => void loadSummary()}>
-            Retry
-          </button>
-        </section>
-      </div>
-    )
-  }
-
-  if (!summary) {
-    return (
-      <div className="container">
-        <p>Waking API at {getApiBaseUrl() || DEFAULT_PROD_API} (Render free tier can take ~50s)…</p>
-      </div>
-    )
-  }
+  const ciPanel = (
+    <CiPipelinePanel
+      mode={nav.tab}
+      selectedRunId={nav.runId}
+      onSelectedRunIdChange={(runId) => go(nav.tab, runId)}
+      onOpenTriage={(runId) => go('triage', runId)}
+      onPipelineFinished={() => void loadSummary()}
+    />
+  )
 
   return (
     <div className="container">
-      {fetchError ? (
+      {fetchError && summary ? (
         <section className="card" style={{ marginBottom: 16, borderColor: 'var(--warning, #a83)' }}>
           <div className="card-title">Refresh failed (showing last loaded data)</div>
           <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 12 }}>{fetchError}</pre>
@@ -298,8 +293,14 @@ function App() {
       ) : null}
       <header>
         <div>
-          <h1>Real-Time Testing Dashboard</h1>
-          <p>Open-source QA observability dashboard for live execution monitoring</p>
+          <h1>
+            {nav.tab === 'triage' ? 'Real-Time Triage Dashboard' : 'Real-Time Testing Dashboard'}
+          </h1>
+          <p>
+            {nav.tab === 'triage'
+              ? 'CI Failure Triage results for GitHub Actions executions'
+              : 'Open-source QA observability dashboard for live execution monitoring'}
+          </p>
         </div>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
           <div className="pill">Data: {dataSource}</div>
@@ -308,7 +309,49 @@ function App() {
         </div>
       </header>
 
-      <CiPipelinePanel onPipelineFinished={() => void loadSummary()} />
+      <nav className="app-tabs" aria-label="Dashboard">
+        <button
+          type="button"
+          className={`app-tab ${nav.tab === 'testing' ? 'active' : ''}`}
+          onClick={() => go('testing', nav.runId)}
+        >
+          realtime-testing-dashboard
+        </button>
+        <button
+          type="button"
+          className={`app-tab ${nav.tab === 'triage' ? 'active' : ''}`}
+          onClick={() => go('triage', nav.runId)}
+        >
+          realtime-triage-dashboard
+        </button>
+      </nav>
+
+      {nav.tab === 'triage' ? ciPanel : null}
+
+      {nav.tab === 'testing' && !summary && fetchError ? (
+        <section className="card" style={{ borderColor: 'var(--danger, #c44)' }}>
+          <div className="card-title">Connection error</div>
+          <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{fetchError}</pre>
+          <p className="meta">
+            Health check:{' '}
+            <a href={`${restApiOrigin()}/api/health`} target="_blank" rel="noreferrer">
+              {restApiOrigin()}/api/health
+            </a>
+            . If this is a hosted API, first load after idle can take ~50s.
+          </p>
+          <button type="button" onClick={() => void loadSummary()}>
+            Retry
+          </button>
+        </section>
+      ) : null}
+
+      {nav.tab === 'testing' && !summary && !fetchError ? (
+        <p>Waking API at {restApiOrigin()}…</p>
+      ) : null}
+
+      {nav.tab === 'testing' && summary ? (
+        <>
+          {ciPanel}
 
       <section className="kpi-grid">
         <div className="kpi"><div className="label">Total Runs</div><div className="value">{summary.totals.runs}</div></div>
@@ -478,6 +521,8 @@ function App() {
           <p>Inject a sample run to demonstrate real-time streaming to the dashboard.</p>
           <button onClick={() => void createDemoRun()}>Create Demo Test Run</button>
         </section>
+        ) : null}
+        </>
       ) : null}
     </div>
   )
