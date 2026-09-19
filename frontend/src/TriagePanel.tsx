@@ -38,6 +38,7 @@ type Props = {
   pipelineConclusion?: string | null
   githubFailedJob?: string | null
   githubFailedStep?: string | null
+  githubRunUrl?: string | null
 }
 
 function evidenceItems(evidence: unknown): string[] {
@@ -73,13 +74,13 @@ function notStartedCopy(
     return 'Waiting for the GitHub Actions run to finish. Triage is ingested after the pipeline completes.'
   }
   if (pipelineConclusion === 'success') {
-    return 'This GitHub run succeeded. There is no failure to triage, and no triage result was posted for this run ID.'
+    return 'This GitHub run succeeded, so there is no failure classification to show.'
   }
   const where = [failedJob, failedStep].filter(Boolean).join(' / ')
   if (where) {
-    return `GitHub reports this run failed at ${where}. Classification appears here only after a triage result is posted for this run ID. This dashboard does not classify failures itself.`
+    return `Failed at ${where}. No classification is stored for this run ID yet.`
   }
-  return 'This GitHub run failed, but no triage result has been posted for this run ID. This dashboard displays ingested results; it does not classify the pipeline itself.'
+  return 'This GitHub run failed, but no classification is stored for this run ID yet.'
 }
 
 export default function TriagePanel({
@@ -90,6 +91,7 @@ export default function TriagePanel({
   pipelineConclusion = null,
   githubFailedJob = null,
   githubFailedStep = null,
+  githubRunUrl = null,
 }: Props) {
   const [result, setResult] = useState<TriageResult | null>(null)
   const [state, setState] = useState<TriageState>('NOT_STARTED')
@@ -149,9 +151,16 @@ export default function TriagePanel({
   return (
     <div className="triage-panel">
       <div className="triage-header">
-        <strong>CI Failure Triage</strong>
+        <strong>Classification</strong>
         <span className={stateClass(state)}>{state.replaceAll('_', ' ')}</span>
       </div>
+      {githubRunUrl ? (
+        <p className="meta">
+          <a href={githubRunUrl} target="_blank" rel="noreferrer" className="html-report-link">
+            Open this run on GitHub
+          </a>
+        </p>
+      ) : null}
 
       {error ? (
         <div className="triage-error">

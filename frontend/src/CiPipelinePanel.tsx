@@ -305,7 +305,7 @@ export default function CiPipelinePanel({
   if (!config) {
     return (
       <section className="card ci-panel">
-        <div className="card-title">{mode === 'triage' ? 'CI execution' : 'CI pipeline control'}</div>
+        <div className="card-title">{mode === 'triage' ? 'CI Failure Triage' : 'CI pipeline control'}</div>
         <p className="meta">Loading CI configuration…</p>
       </section>
     )
@@ -336,12 +336,12 @@ export default function CiPipelinePanel({
 
   return (
     <section className="card ci-panel">
-      <div className="card-title">{mode === 'triage' ? 'CI execution' : 'CI pipeline control'}</div>
+      <div className="card-title">{mode === 'triage' ? 'CI Failure Triage' : 'CI pipeline control'}</div>
       <p className="meta" style={{ marginTop: 0 }}>
         {mode === 'triage' ? (
           <>
-            Load a GitHub Actions run for <strong>{config.repo}</strong>, then review the correlated CI Failure Triage
-            result.
+            Load a GitHub Actions run ID to show the ingested classification for{' '}
+            <strong>{config.repo}</strong>. Job logs stay on the Testing tab and on GitHub.
           </>
         ) : (
           <>
@@ -427,10 +427,11 @@ export default function CiPipelinePanel({
           pipelineConclusion={flow?.conclusion ?? null}
           githubFailedJob={firstFailedStep(flow)?.job ?? null}
           githubFailedStep={firstFailedStep(flow)?.step ?? null}
+          githubRunUrl={flow?.html_url ?? null}
         />
       ) : null}
 
-      {flow ? (
+      {mode === 'testing' && flow ? (
         <div className="ci-flow">
           <div className="ci-flow-header">
             <strong>{flow.name}</strong>
