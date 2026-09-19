@@ -373,33 +373,36 @@ export default function CiPipelinePanel({
               {triggering ? 'Starting…' : 'Run pipeline'}
             </button>
           </>
-        ) : null}
-        <label className="ci-field">
-          <span className="meta">Existing run ID</span>
-          <input
-            className="html-report-select"
-            inputMode="numeric"
-            value={existingRunId}
-            onChange={(e) => setExistingRunId(e.target.value)}
-            placeholder="32837090794"
-          />
-        </label>
-        <button type="button" disabled={loadingExisting || !existingRunId.trim()} onClick={() => void loadExistingRun()}>
-          {loadingExisting ? 'Loading…' : 'Load run'}
-        </button>
-        {mode === 'triage' && latestFailedRunId ? (
-          <button
-            type="button"
-            className="app-tab-link"
-            disabled={loadingExisting || latestFailedRunId === activeRunId}
-            onClick={() => {
-              setExistingRunId(String(latestFailedRunId))
-              selectRun(latestFailedRunId)
-            }}
-          >
-            Load latest failed run
-          </button>
-        ) : null}
+        ) : (
+          <>
+            <label className="ci-field">
+              <span className="meta">Existing run ID</span>
+              <input
+                className="html-report-select"
+                inputMode="numeric"
+                value={existingRunId}
+                onChange={(e) => setExistingRunId(e.target.value)}
+                placeholder="32837090794"
+              />
+            </label>
+            <button type="button" disabled={loadingExisting || !existingRunId.trim()} onClick={() => void loadExistingRun()}>
+              {loadingExisting ? 'Loading…' : 'Load run'}
+            </button>
+            {latestFailedRunId ? (
+              <button
+                type="button"
+                className="app-tab-link"
+                disabled={loadingExisting || latestFailedRunId === activeRunId}
+                onClick={() => {
+                  setExistingRunId(String(latestFailedRunId))
+                  selectRun(latestFailedRunId)
+                }}
+              >
+                Load latest failed run
+              </button>
+            ) : null}
+          </>
+        )}
       </div>
 
       {error ? <p className="meta" style={{ color: 'var(--danger)' }}>{error}</p> : null}
