@@ -325,14 +325,18 @@ function App() {
           className={`app-tab ${nav.tab === 'testing' ? 'active' : ''}`}
           onClick={() => go('testing', nav.runId)}
         >
-          Testing
+          <span className="app-tab-kicker">Watch live</span>
+          <span className="app-tab-title">Testing</span>
+          <span className="app-tab-copy">KPIs, pipeline control, HTML reports</span>
         </button>
         <button
           type="button"
           className={`app-tab ${nav.tab === 'triage' ? 'active' : ''}`}
           onClick={() => go('triage', nav.runId)}
         >
-          Triage
+          <span className="app-tab-kicker">Inspect failures</span>
+          <span className="app-tab-title">Triage</span>
+          <span className="app-tab-copy">GitHub run + CI Failure Triage</span>
         </button>
       </nav>
 
