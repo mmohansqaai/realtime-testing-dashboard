@@ -340,8 +340,8 @@ export default function CiPipelinePanel({
       <p className="meta" style={{ marginTop: 0 }}>
         {mode === 'triage' ? (
           <>
-            Load a GitHub Actions run ID to show the ingested classification for{' '}
-            <strong>{config.repo}</strong>. Job logs stay on the Testing tab and on GitHub.
+            Load a GitHub Actions run ID to see a test-by-test failure report for{' '}
+            <strong>{config.repo}</strong>. Each failed test is classified and explained separately.
           </>
         ) : (
           <>

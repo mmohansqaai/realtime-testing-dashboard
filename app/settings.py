@@ -22,6 +22,17 @@ GITHUB_CI_REPO = os.getenv('GITHUB_CI_REPO', '').strip()
 GITHUB_CI_WORKFLOW_FILE = os.getenv('GITHUB_CI_WORKFLOW_FILE', 'playwright.yml').strip()
 GITHUB_CI_DEFAULT_REF = os.getenv('GITHUB_CI_DEFAULT_REF', 'main').strip() or 'main'
 
+AI_API_KEY = (os.getenv('AI_API_KEY') or os.getenv('OPENAI_API_KEY') or '').strip()
+AI_BASE_URL = (os.getenv('AI_BASE_URL') or 'https://api.openai.com').strip().rstrip('/') or 'https://api.openai.com'
+AI_MODEL = (os.getenv('AI_MODEL') or 'gpt-4o-mini').strip() or 'gpt-4o-mini'
+_AI_ENABLED_RAW = (os.getenv('AI_ENABLED') or 'true').strip().lower()
+
 
 def github_ci_enabled() -> bool:
     return bool(GITHUB_CI_TOKEN and GITHUB_CI_REPO)
+
+
+def ai_enabled() -> bool:
+    if _AI_ENABLED_RAW in {'0', 'false', 'no', 'off'}:
+        return False
+    return bool(AI_API_KEY)

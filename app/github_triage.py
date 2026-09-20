@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 from typing import Any, Optional
 
-from . import github_ci, schemas
+from . import ai_triage, github_ci, schemas
 
 ANSI_RE = re.compile(r'\x1b\[[0-9;?]*[ -/]*[@-~]')
 TIMESTAMP_RE = re.compile(r'^\d{4}-\d{2}-\d{2}T[\d:.]+Z\s+', re.M)
@@ -14,8 +14,44 @@ LOW_VALUE_RE = re.compile(
     r'demo_dashboard_failures|deprecationwarning|node\.js 20 is deprecated|ubuntu-latest label will migrate',
     re.I,
 )
+FAILURE_HEADER_RE = re.compile(r'^\s*(\d+)\)\s+\[([^\]]+)\]\s+›\s+(.+)$', re.M)
+LOCATOR_RE = re.compile(r'Locator:\s*(.+)', re.I)
+EXPECTED_RE = re.compile(r'Expected:\s+"([^"]*)"', re.I)
+RECEIVED_RE = re.compile(r'Received:\s+"([^"]*)"', re.I)
+URL_RE = re.compile(r'https?://[^\s]+')
+ERROR_LINE_RE = re.compile(r'^(?:Error:|Expected:|Received:|Locator:|page\.goto:)', re.I)
 
 Signature = tuple[str, str, int, int, bool, list[re.Pattern[str]], Optional[str]]
+
+FRIENDLY_CLASS = {
+    'AUTH_SECURITY': 'Authentication',
+    'CI_INFRASTRUCTURE': 'CI / dashboard',
+    'ENVIRONMENT': 'Environment',
+    'AUTOMATION_DEFECT': 'Test script',
+    'PRODUCT_DEFECT': 'Product',
+    'UNKNOWN': 'Needs review',
+}
+
+FRIENDLY_SUBTYPE = {
+    'TOKEN_OR_UNAUTHORIZED': 'Unauthorized or expired token',
+    'DOWNSTREAM_SERVICE_UNAVAILABLE': 'Dashboard publish timed out',
+    'HTTP_5XX_UNAVAILABLE': 'Service returned HTTP 5xx',
+    'SERVICE_CONNECTION_REFUSED': 'App connection refused',
+    'LOCATOR_FAILURE': 'Element not found',
+    'ASSERTION_MISMATCH': 'Expected value did not match',
+    'DOWNSTREAM_SERVICE': 'Publish / health-check failed',
+    'RUNNER_SETUP': 'Runner setup failed',
+    'INSUFFICIENT_EVIDENCE': 'Not enough log evidence',
+}
+
+OWNER_BY_CLASS = {
+    'AUTOMATION_DEFECT': 'QE',
+    'PRODUCT_DEFECT': 'Product',
+    'ENVIRONMENT': 'DevOps',
+    'CI_INFRASTRUCTURE': 'CI',
+    'AUTH_SECURITY': 'DevOps',
+    'UNKNOWN': 'Human review',
+}
 
 
 def _first_failure(flow: dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
@@ -103,51 +139,218 @@ def _signatures(is_test: bool, is_downstream: bool) -> list[Signature]:
 
 
 def _match_rules(log_text: str, is_test: bool, is_downstream: bool) -> list[Signature]:
-    haystack = log_text
     matched: list[Signature] = []
     for rule in _signatures(is_test, is_downstream):
-        if any(pattern.search(haystack) for pattern in rule[5]):
+        if any(pattern.search(log_text) for pattern in rule[5]):
             matched.append(rule)
     matched.sort(key=lambda item: item[2])
     return matched
 
 
-def _failed_playwright_tests(log_text: str) -> list[str]:
-    names: list[str] = []
+def _display_title(rest: str) -> str:
+    parts = [part.strip() for part in rest.split('›') if part.strip()]
+    title = parts[-1] if parts else rest
+    return re.sub(r'\s+@[\w-]+$', '', title).strip() or rest
+
+
+def _file_location(rest: str) -> Optional[str]:
+    parts = [part.strip() for part in rest.split('›') if part.strip()]
+    if parts and re.search(r'\.(spec|test)\.[jt]sx?:\d+', parts[0]):
+        return parts[0]
+    return None
+
+
+def parse_playwright_failures(log_text: str) -> list[dict[str, str]]:
+    headers = list(FAILURE_HEADER_RE.finditer(log_text))
+    cases: list[dict[str, str]] = []
     seen: set[str] = set()
-    for match in re.finditer(r'^\s*\d+\)\s+\[[^\]]+\]\s+›\s+(.+)$', log_text, re.M):
-        name = match.group(1).strip()
-        if name and name not in seen:
-            seen.add(name)
-            names.append(name)
-    return names[:5]
+    for index, match in enumerate(headers[:8]):
+        start = match.end()
+        end = headers[index + 1].start() if index + 1 < len(headers) else len(log_text)
+        body = log_text[start:end].strip()
+        body = re.split(r'\n\s*\d+\s+failed\b', body, maxsplit=1)[0].strip()
+        full_name = match.group(3).strip()
+        if full_name in seen:
+            continue
+        seen.add(full_name)
+        cases.append(
+            {
+                'project': match.group(2).strip(),
+                'full_name': full_name,
+                'title': _display_title(full_name),
+                'file': _file_location(full_name) or '',
+                'body': body,
+            }
+        )
+    return cases
 
 
-def _evidence_lines(log_text: str, matches: list[Signature], failed_tests: list[str]) -> list[str]:
+def _error_excerpt(body: str) -> list[str]:
     lines: list[str] = []
     seen: set[str] = set()
+    for raw in body.splitlines():
+        trimmed = re.sub(r'\s+', ' ', raw).strip()
+        if not trimmed or trimmed in seen or LOW_VALUE_RE.search(trimmed):
+            continue
+        if ERROR_LINE_RE.search(trimmed) or 'ERR_CONNECTION_REFUSED' in trimmed or 'element(s) not found' in trimmed:
+            seen.add(trimmed)
+            lines.append(trimmed[:240])
+        if len(lines) >= 4:
+            break
+    return lines
 
-    def add(item: str) -> None:
-        text = re.sub(r'\s+', ' ', item).strip()
-        if not text or text in seen or LOW_VALUE_RE.search(text):
-            return
-        seen.add(text)
-        lines.append(text[:240])
 
-    for test_name in failed_tests:
-        add(f'Failed Playwright test: {test_name}')
-    for rule in matches:
-        add(f'Matched {rule[0]}/{rule[1]}')
+def _narrative_for(classification: str, subtype: str, body: str, title: str) -> tuple[str, str, str]:
+    locator = (LOCATOR_RE.search(body) or [None, None])[1]
+    expected = (EXPECTED_RE.search(body) or [None, None])[1]
+    received = (RECEIVED_RE.search(body) or [None, None])[1]
+    url_match = URL_RE.search(body)
+    url = url_match.group(0).rstrip('.,)') if url_match else None
 
-    high_value = re.compile(
-        r'toBeVisible|element\(s\) not found|getByRole|ERR_CONNECTION_REFUSED|Expected:\s+"|Received:\s+"|curl:\s*\(28\)|exit code 28|strict mode|401 Unauthorized|503',
-        re.I,
+    if classification == 'AUTOMATION_DEFECT':
+        target = locator or 'the expected UI element'
+        what = f'The test “{title}” looked for {target} and it never appeared.'
+        why = 'This is a locator/script mismatch with the current UI, not a backend outage.'
+        action = 'Update the Playwright locator (or remove the assertion if the UI no longer has that element), then re-run this test.'
+        return what, why, action
+    if classification == 'PRODUCT_DEFECT':
+        if expected is not None and received is not None:
+            what = f'The test expected “{expected}” but the application showed “{received}”.'
+        else:
+            what = f'The test “{title}” compared an expected business value with what the app actually rendered, and they did not match.'
+        why = 'This is a product vs test-expectation mismatch. A person needs to decide which one is correct.'
+        action = 'Confirm with product whether the current application value is intended. If it is, update the test expectation; if not, file a product defect.'
+        return what, why, action
+    if classification == 'ENVIRONMENT' and subtype == 'SERVICE_CONNECTION_REFUSED':
+        where = f' at {url}' if url else ''
+        what = f'The browser could not open the application{where} because the connection was refused.'
+        why = 'The app or a dependent service was not listening, so this test never reached the UI under test.'
+        action = 'Confirm the target URL is deployed and reachable from GitHub Actions, then re-run this test.'
+        return what, why, action
+    if classification == 'ENVIRONMENT':
+        what = f'The test “{title}” failed because a required service was unavailable.'
+        why = 'This looks like environment unavailability rather than an assertion in the product UI.'
+        action = 'Check the service health/logs for the environment used by CI, then re-run.'
+        return what, why, action
+    if classification == 'CI_INFRASTRUCTURE':
+        what = 'A CI publishing or health-check step failed after (or instead of) the product tests.'
+        why = 'The pipeline could not reach the dashboard or another downstream service.'
+        action = 'Verify the dashboard ingest URL, token, and service availability, then re-run the workflow.'
+        return what, why, action
+    if classification == 'AUTH_SECURITY':
+        what = 'The pipeline or tests received an authentication failure such as HTTP 401 or an invalid token.'
+        why = 'Credentials used by CI are missing, expired, or unauthorized.'
+        action = 'Refresh the token/secret used by this workflow, then re-run.'
+        return what, why, action
+    what = f'The test “{title}” failed, but the logs do not contain a specific known signature.'
+    why = 'A failed Playwright step name alone is not enough to classify the defect.'
+    action = 'Open the failed job logs and inspect the error for this test.'
+    return what, why, action
+
+
+def classify_test_case(case: dict[str, str], is_test: bool = True) -> dict[str, Any]:
+    matches = _match_rules(case.get('body') or '', is_test=is_test, is_downstream=False)
+    if matches:
+        winner = matches[0]
+        classification = winner[0]
+        subtype = winner[1]
+        confidence = winner[3]
+        review = winner[4]
+        priority = winner[2]
+    else:
+        classification = 'UNKNOWN'
+        subtype = 'INSUFFICIENT_EVIDENCE'
+        confidence = 20
+        review = True
+        priority = 999
+    title = case.get('title') or case.get('full_name') or 'Failed test'
+    what, why, action = _narrative_for(classification, subtype, case.get('body') or '', title)
+    evidence = _error_excerpt(case.get('body') or '')
+    return {
+        'title': title,
+        'full_name': case.get('full_name') or title,
+        'file': case.get('file') or None,
+        'classification': getattr(schemas.TriageClassification, classification),
+        'subtype': subtype,
+        'confidence': confidence,
+        'what_happened': what,
+        'why_it_failed': why,
+        'recommended_action': action,
+        'owner': OWNER_BY_CLASS.get(classification, 'Human review'),
+        'evidence': evidence,
+        'error_excerpt': evidence[0] if evidence else None,
+        '_priority': priority,
+        '_review': review,
+        '_class_name': classification,
+    }
+
+
+def _run_summary(failed_tests: list[dict[str, Any]], mixed: bool, winner_label: str) -> str:
+    count = len(failed_tests)
+    if count == 0:
+        return f'Primary signal is {winner_label.replace("_", " ").lower()} from the GitHub job logs.'
+    if mixed:
+        labels = []
+        seen = set()
+        for item in failed_tests:
+            key = item['_class_name']
+            if key in seen:
+                continue
+            seen.add(key)
+            labels.append(FRIENDLY_CLASS.get(key, key).lower())
+        return (
+            f'{count} tests failed, and they do not share one root cause '
+            f'({", ".join(labels)}). Review each test on its own before changing product or scripts.'
+        )
+    noun = 'test' if count == 1 else 'tests'
+    return f'{count} failed {noun} point to the same area: {FRIENDLY_CLASS.get(winner_label, winner_label).lower()}.'
+
+
+def _public_tests(failed_tests: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    public = []
+    for item in failed_tests:
+        row = {key: value for key, value in item.items() if not key.startswith('_')}
+        public.append(row)
+    return public
+
+
+def _cause_and_action(winner: Signature, mixed: bool, labels: list[str]) -> tuple[str, str]:
+    if mixed:
+        cause = (
+            f"Multiple distinct failures were found ({'; '.join(labels)}). "
+            f'Primary signal is {FRIENDLY_SUBTYPE.get(winner[1], winner[1].replace("_", " ").lower())}.'
+        )
+        action = 'Work the highest-priority failure first, then the other failed tests; they are separate issues.'
+        return cause, action
+    if winner[0] == 'ENVIRONMENT' and winner[1] == 'SERVICE_CONNECTION_REFUSED':
+        return (
+            'The target application or service refused connections and was unavailable during the run.',
+            'Confirm the application is listening and reachable from CI, then re-run.',
+        )
+    if winner[0] == 'AUTOMATION_DEFECT':
+        return (
+            'A UI locator failed to target the intended element during test execution.',
+            'Update the locator/test to match the current UI, then re-run.',
+        )
+    if winner[0] == 'PRODUCT_DEFECT':
+        return (
+            'A business assertion compared expected and actual values and they did not match.',
+            'Have a human confirm whether the product behavior or the test expectation is wrong.',
+        )
+    if winner[0] == 'CI_INFRASTRUCTURE':
+        return (
+            'Downstream dashboard/service did not respond to health checks.',
+            'Verify dashboard/health-check endpoint availability and retry publishing once the service recovers.',
+        )
+    if winner[0] == 'AUTH_SECURITY':
+        return (
+            'The pipeline or tests received an authentication failure such as HTTP 401 or an expired/invalid token.',
+            'Refresh credentials, tokens, and secrets used by the pipeline, then re-run.',
+        )
+    return (
+        'A known failure signature was matched in the GitHub job logs.',
+        'Inspect the failed step logs and the matching signature evidence.',
     )
-    for raw in log_text.splitlines():
-        trimmed = raw.strip()
-        if high_value.search(trimmed):
-            add(trimmed)
-    return lines[:8]
 
 
 def classify_github_flow(flow: dict[str, Any], log_text: str = '') -> Optional[dict[str, Any]]:
@@ -164,9 +367,48 @@ def classify_github_flow(flow: dict[str, Any], log_text: str = '') -> Optional[d
     is_downstream = _is_downstream_stage(step_blob) or (not failed_step and _is_downstream_stage(job_blob))
     is_setup = _is_setup_stage(step_blob) or (not failed_step and _is_setup_stage(job_blob))
     normalized = _normalize_log(log_text)
-    matches = _match_rules(normalized, is_test, is_downstream) if normalized.strip() else []
 
-    if matches:
+    parsed_cases = parse_playwright_failures(normalized) if is_test and normalized.strip() else []
+    failed_tests = [classify_test_case(case, is_test=True) for case in parsed_cases]
+    matches = _match_rules(normalized, is_test, is_downstream) if normalized.strip() else []
+    related_failures: list[str] = []
+    executive_summary = ''
+
+    if failed_tests:
+        winner_item = min(failed_tests, key=lambda item: item['_priority'])
+        winner = (
+            winner_item['_class_name'],
+            winner_item['subtype'],
+            winner_item['_priority'],
+            winner_item['confidence'],
+            winner_item['_review'],
+            [],
+            'test',
+        )
+        seen_class = {winner[0]}
+        distinct = []
+        for item in failed_tests:
+            if item is winner_item or item['_class_name'] in seen_class:
+                continue
+            seen_class.add(item['_class_name'])
+            distinct.append(f"{item['_class_name']}/{item['subtype']}")
+        mixed = bool(distinct)
+        classification = winner_item['classification']
+        subtype = winner_item['subtype']
+        confidence = min(winner_item['confidence'], 72) if mixed else winner_item['confidence']
+        review = True if mixed else winner_item['_review']
+        labels = [f'{winner[0]}/{winner[1]}'] + distinct
+        cause, action = _cause_and_action(winner, mixed, labels)
+        related_failures = distinct
+        executive_summary = _run_summary(failed_tests, mixed, winner[0])
+        evidence = [
+            f'{len(failed_tests)} failed Playwright test{"s" if len(failed_tests) != 1 else ""}',
+            f'Failed job: {failed_job or "unknown"}',
+            f'Failed step: {failed_step or "unknown"}',
+        ]
+        if mixed:
+            evidence.append(f'Related failures: {", ".join(distinct)}')
+    elif matches:
         winner = matches[0]
         distinct = []
         seen_class = {winner[0]}
@@ -179,51 +421,24 @@ def classify_github_flow(flow: dict[str, Any], log_text: str = '') -> Optional[d
         subtype = winner[1]
         confidence = min(winner[3], 72) if mixed else winner[3]
         review = True if mixed else winner[4]
-        if mixed:
-            labels = [f'{winner[0]}/{winner[1]}'] + distinct
-            cause = (
-                f"Multiple distinct failures were found ({'; '.join(labels)}). "
-                f'Primary signal is {winner[1].replace("_", " ").lower()} from the GitHub job logs.'
-            )
-            action = (
-                'Inspect the primary failure first, then review the other failed tests; '
-                'they do not share a single root cause.'
-            )
-        elif winner[0] == 'ENVIRONMENT' and winner[1] == 'SERVICE_CONNECTION_REFUSED':
-            cause = 'The target application or service refused connections and was unavailable during the run.'
-            action = 'Confirm the application is listening and reachable from CI, then re-run.'
-        elif winner[0] == 'AUTOMATION_DEFECT':
-            cause = 'A UI locator failed to target the intended element during test execution.'
-            action = 'Update the locator/test to match the current UI, then re-run.'
-        elif winner[0] == 'PRODUCT_DEFECT':
-            cause = 'A business assertion compared expected and actual values and they did not match.'
-            action = 'Have a human confirm whether the product behavior or the test expectation is wrong.'
-        elif winner[0] == 'CI_INFRASTRUCTURE':
-            cause = 'Downstream dashboard/service did not respond to health checks.'
-            action = 'Verify dashboard/health-check endpoint availability and retry publishing once the service recovers.'
-        elif winner[0] == 'AUTH_SECURITY':
-            cause = 'The pipeline or tests received an authentication failure such as HTTP 401 or an expired/invalid token.'
-            action = 'Refresh credentials, tokens, and secrets used by the pipeline, then re-run.'
-        else:
-            cause = 'A known failure signature was matched in the GitHub job logs.'
-            action = 'Inspect the failed step logs and the matching signature evidence.'
-        failed_tests = _failed_playwright_tests(normalized)
+        labels = [f'{winner[0]}/{winner[1]}'] + distinct
+        cause, action = _cause_and_action(winner, mixed, labels)
+        related_failures = distinct
+        executive_summary = cause
         evidence = [
             f"GitHub conclusion: {flow.get('status')} / {flow.get('conclusion')}",
             f'Failed job: {failed_job or "unknown"}',
             f'Failed step: {failed_step or "unknown"}',
-            *([f'Related failures: {", ".join(distinct)}'] if distinct else []),
-            *_evidence_lines(normalized, matches, failed_tests),
         ]
-        related_failures = distinct
+        if distinct:
+            evidence.append(f'Related failures: {", ".join(distinct)}')
     elif is_downstream:
         classification = schemas.TriageClassification.CI_INFRASTRUCTURE
         subtype = 'DOWNSTREAM_SERVICE'
-        cause = 'A CI publishing or health-check step failed after tests, not the product under test.'
-        action = 'Check the dashboard ingest URL, token, and service availability, then re-run the workflow.'
+        cause, _why, action = _narrative_for('CI_INFRASTRUCTURE', subtype, '', failed_step or 'publish')
         confidence = 82
         review = False
-        related_failures = []
+        executive_summary = cause
         evidence = [
             f"GitHub conclusion: {flow.get('status')} / {flow.get('conclusion')}",
             f'Failed job: {failed_job or "unknown"}',
@@ -236,7 +451,7 @@ def classify_github_flow(flow: dict[str, Any], log_text: str = '') -> Optional[d
         action = 'Inspect the failed setup step logs, pin action versions, and retry the job.'
         confidence = 76
         review = True
-        related_failures = []
+        executive_summary = cause
         evidence = [
             f"GitHub conclusion: {flow.get('status')} / {flow.get('conclusion')}",
             f'Failed job: {failed_job or "unknown"}',
@@ -245,14 +460,10 @@ def classify_github_flow(flow: dict[str, Any], log_text: str = '') -> Optional[d
     else:
         classification = schemas.TriageClassification.UNKNOWN
         subtype = 'INSUFFICIENT_EVIDENCE'
-        cause = (
-            'A GitHub Actions step failed, but job logs do not contain a specific failure signature. '
-            'A failed Playwright step is not enough to classify an automation defect.'
-        )
-        action = 'Open the failed job logs on GitHub and inspect the actual test or step error.'
+        cause, _why, action = _narrative_for('UNKNOWN', subtype, '', failed_step or 'failed step')
         confidence = 20
         review = True
-        related_failures = []
+        executive_summary = cause
         evidence = [
             f"GitHub conclusion: {flow.get('status')} / {flow.get('conclusion')}",
             f'Failed job: {failed_job or "unknown"}',
@@ -280,6 +491,8 @@ def classify_github_flow(flow: dict[str, Any], log_text: str = '') -> Optional[d
         'human_review_required': review,
         'analysis_mode': schemas.AnalysisMode.DETERMINISTIC,
         'related_failures': related_failures or None,
+        'failed_tests': _public_tests(failed_tests) or None,
+        'executive_summary': executive_summary or None,
         'created_at': now,
         'updated_at': now,
     }
@@ -290,6 +503,10 @@ async def derive_github_triage(repository: str, run_id: str) -> Optional[schemas
         run_key = int(str(run_id).strip())
     except ValueError:
         return None
+    cache_key = f'triage:{repository}:{run_id}'
+    cached = github_ci._cache_get(cache_key)
+    if cached is not None:
+        return cached
     try:
         flow = await github_ci.get_run_flow(run_key)
         log_text = await github_ci.get_failed_job_logs(flow)
@@ -301,4 +518,8 @@ async def derive_github_triage(repository: str, run_id: str) -> Optional[schemas
     payload['repository'] = repository
     payload['run_id'] = str(run_id)
     payload['provider'] = 'github-actions'
-    return schemas.TriageResultResponse.model_validate(payload)
+    payload = await ai_triage.enrich_triage(payload)
+    result = schemas.TriageResultResponse.model_validate(payload)
+    ttl = 600 if str(flow.get('status') or '') in {'completed', 'cancelled'} else 8
+    github_ci._cache_set(cache_key, result, ttl)
+    return result

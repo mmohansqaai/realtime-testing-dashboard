@@ -489,6 +489,20 @@ code {
   margin-bottom: 12px;
 }
 
+.triage-header-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.triage-mode {
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--info);
+}
+
 .triage-state {
   font-size: 0.75rem;
   font-weight: 800;
@@ -534,6 +548,152 @@ code {
   font-weight: 800;
 }
 
+.triage-summary-card {
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 14px;
+}
+
+.triage-summary-kicker {
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.triage-summary-text {
+  margin: 0 0 12px;
+  font-size: 1.02rem;
+  line-height: 1.45;
+}
+
+.triage-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.triage-pill {
+  font-size: 0.75rem;
+  font-weight: 800;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text);
+  background: #fff;
+}
+
+.triage-pill.env {
+  color: var(--info);
+  border-color: #dcc6f3;
+  background: #f7f1fc;
+}
+
+.triage-pill.auto {
+  color: #8a4b08;
+  border-color: #f0d2a8;
+  background: #fff6ea;
+}
+
+.triage-pill.product {
+  color: var(--danger);
+  border-color: #f0c7c7;
+  background: #fdf4f4;
+}
+
+.triage-pill.auth,
+.triage-pill.unknown {
+  color: var(--muted);
+}
+
+.triage-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-bottom: 16px;
+}
+
+.triage-test-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.triage-test-card {
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: #fff;
+}
+
+.triage-test-card.env { border-left-color: var(--accent); }
+.triage-test-card.auto { border-left-color: var(--warning); }
+.triage-test-card.product { border-left-color: var(--danger); }
+.triage-test-card.auth,
+.triage-test-card.unknown { border-left-color: var(--muted); }
+
+.triage-test-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.triage-test-index {
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.triage-owner {
+  margin-left: auto;
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.triage-test-title {
+  margin: 0 0 4px;
+  font-size: 1.05rem;
+}
+
+.triage-test-file {
+  margin: 0 0 10px;
+}
+
+.triage-test-body {
+  display: grid;
+  gap: 10px;
+}
+
+.triage-test-body p {
+  margin: 0;
+}
+
+.triage-evidence-details {
+  margin-top: 12px;
+}
+
+.triage-evidence-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
 .triage-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -542,7 +702,8 @@ code {
 }
 
 .triage-field .label,
-.triage-block .label {
+.triage-block .label,
+.triage-test-body .label {
   color: var(--muted);
   font-size: 0.8rem;
   margin-bottom: 4px;

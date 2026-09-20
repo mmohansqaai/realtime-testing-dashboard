@@ -53,16 +53,32 @@ class GithubTriageTests(unittest.TestCase):
         self.assertEqual(result['subtype'], 'SERVICE_CONNECTION_REFUSED')
         self.assertTrue(result['human_review_required'])
         self.assertEqual(result['triage_state'].value, 'REVIEW_REQUIRED')
-        evidence = '\n'.join(result['evidence'])
-        self.assertRegex(evidence, r'ERR_CONNECTION_REFUSED|connection-refused')
-        self.assertRegex(evidence, r'toBeVisible|Flash checkout')
-        self.assertRegex(evidence, r'Nova Retail|BayOne Retail')
-        self.assertIn('PRODUCT_DEFECT/ASSERTION_MISMATCH', evidence)
-        self.assertNotIn('PLAYWRIGHT_TEST_FAILURE', evidence)
+        self.assertNotIn('PLAYWRIGHT_TEST_FAILURE', '\n'.join(result['evidence']))
         self.assertEqual(
             result['related_failures'],
             ['AUTOMATION_DEFECT/LOCATOR_FAILURE', 'PRODUCT_DEFECT/ASSERTION_MISMATCH'],
         )
+        tests = result['failed_tests']
+        self.assertEqual(len(tests), 3)
+        self.assertEqual(
+            [item['classification'].value for item in tests],
+            ['AUTOMATION_DEFECT', 'PRODUCT_DEFECT', 'ENVIRONMENT'],
+        )
+        env = next(item for item in tests if item['classification'].value == 'ENVIRONMENT')
+        self.assertEqual(env['subtype'], 'SERVICE_CONNECTION_REFUSED')
+        self.assertIn('connection was refused', env['what_happened'].lower())
+        titles = [item['title'] for item in tests]
+        self.assertTrue(any('checkout promo' in title for title in titles))
+        self.assertTrue(any('Nova Retail' in title for title in titles))
+        self.assertTrue(any('connection-refused' in title for title in titles))
+        by_class = {item['classification'].value: item for item in tests}
+        self.assertIn('AUTOMATION_DEFECT', by_class)
+        self.assertIn('PRODUCT_DEFECT', by_class)
+        self.assertIn('Flash checkout', by_class['AUTOMATION_DEFECT']['what_happened'])
+        self.assertIn('Nova Retail', by_class['PRODUCT_DEFECT']['what_happened'])
+        self.assertIn('BayOne Retail', by_class['PRODUCT_DEFECT']['what_happened'])
+        self.assertIn('executive_summary', result)
+        self.assertIn('do not share one root cause', result['executive_summary'])
 
     def test_publish_step_without_logs_is_infrastructure(self):
         flow = {
@@ -95,6 +111,49 @@ class GithubJobLogDecodeTests(unittest.TestCase):
             archive.writestr('0_run.txt', 'net::ERR_CONNECTION_REFUSED at https://example.test')
         text = decode_job_logs(buf.getvalue())
         self.assertIn('ERR_CONNECTION_REFUSED', text)
+
+
+class AiTriageMergeTests(unittest.TestCase):
+    def test_ai_copy_does_not_change_classification(self):
+        from app.ai_triage import _merge
+        from app.schemas import TriageClassification
+
+        payload = {
+            'probable_cause': 'old',
+            'executive_summary': 'old',
+            'recommended_action': 'old action',
+            'failed_tests': [
+                {
+                    'title': 'home page shows checkout promo that does not exist',
+                    'full_name': 'tests/a.spec.ts:14:7 › home page shows checkout promo that does not exist',
+                    'classification': TriageClassification.AUTOMATION_DEFECT,
+                    'subtype': 'LOCATOR_FAILURE',
+                    'what_happened': 'old',
+                    'why_it_failed': 'old',
+                    'recommended_action': 'old',
+                    'owner': 'QE',
+                }
+            ],
+        }
+        merged = _merge(
+            payload,
+            {
+                'runSummary': 'One locator is outdated and should be updated by QE.',
+                'tests': [
+                    {
+                        'fullName': payload['failed_tests'][0]['full_name'],
+                        'whatHappened': 'The heading Flash checkout was not on the page.',
+                        'whyItFailed': 'The test still looks for a promo that the UI no longer shows.',
+                        'recommendedAction': 'Change or remove that locator.',
+                        'owner': 'QE',
+                    }
+                ],
+            },
+        )
+        self.assertEqual(merged['executive_summary'], 'One locator is outdated and should be updated by QE.')
+        self.assertEqual(merged['failed_tests'][0]['classification'], TriageClassification.AUTOMATION_DEFECT)
+        self.assertEqual(merged['failed_tests'][0]['what_happened'], 'The heading Flash checkout was not on the page.')
+        self.assertEqual(merged['failed_tests'][0]['owner'], 'QE')
 
 
 if __name__ == '__main__':

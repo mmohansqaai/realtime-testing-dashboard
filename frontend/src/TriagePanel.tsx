@@ -8,6 +8,21 @@ export type TriageState =
   | 'REVIEW_REQUIRED'
   | 'FAILED_TO_ANALYZE'
 
+export type FailedTestTriage = {
+  title: string
+  fullName: string
+  file?: string | null
+  classification: string
+  subtype: string
+  confidence: number
+  whatHappened: string
+  whyItFailed: string
+  recommendedAction: string
+  owner?: string | null
+  evidence?: string[]
+  errorExcerpt?: string | null
+}
+
 export type TriageResult = {
   id: number
   provider: string
@@ -27,6 +42,8 @@ export type TriageResult = {
   humanReviewRequired?: boolean | null
   analysisMode?: string | null
   relatedFailures?: string[] | null
+  failedTests?: FailedTestTriage[] | null
+  executiveSummary?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -40,6 +57,30 @@ type Props = {
   githubFailedJob?: string | null
   githubFailedStep?: string | null
   githubRunUrl?: string | null
+}
+
+const CLASS_LABEL: Record<string, string> = {
+  AUTOMATION_DEFECT: 'Test script',
+  PRODUCT_DEFECT: 'Product',
+  ENVIRONMENT: 'Environment',
+  CI_INFRASTRUCTURE: 'CI / dashboard',
+  AUTH_SECURITY: 'Authentication',
+  FLAKY_TEST: 'Flaky test',
+  TEST_DATA: 'Test data',
+  DEPENDENCY_CONFIG: 'Dependency',
+  UNKNOWN: 'Needs review',
+}
+
+const SUBTYPE_LABEL: Record<string, string> = {
+  LOCATOR_FAILURE: 'Element not found',
+  ASSERTION_MISMATCH: 'Value mismatch',
+  SERVICE_CONNECTION_REFUSED: 'Connection refused',
+  HTTP_5XX_UNAVAILABLE: 'Service unavailable',
+  TOKEN_OR_UNAUTHORIZED: 'Unauthorized',
+  DOWNSTREAM_SERVICE_UNAVAILABLE: 'Publish timed out',
+  DOWNSTREAM_SERVICE: 'Publish failed',
+  RUNNER_SETUP: 'Setup failed',
+  INSUFFICIENT_EVIDENCE: 'Not enough evidence',
 }
 
 function evidenceItems(evidence: unknown): string[] {
@@ -59,6 +100,24 @@ function stateClass(state: TriageState): string {
   return 'triage-state'
 }
 
+function classTone(classification?: string | null): string {
+  if (classification === 'ENVIRONMENT' || classification === 'CI_INFRASTRUCTURE') return 'env'
+  if (classification === 'AUTOMATION_DEFECT') return 'auto'
+  if (classification === 'PRODUCT_DEFECT') return 'product'
+  if (classification === 'AUTH_SECURITY') return 'auth'
+  return 'unknown'
+}
+
+function prettyClass(value?: string | null): string {
+  if (!value) return '—'
+  return CLASS_LABEL[value] || value.replaceAll('_', ' ')
+}
+
+function prettySubtype(value?: string | null): string {
+  if (!value) return ''
+  return SUBTYPE_LABEL[value] || value.replaceAll('_', ' ').toLowerCase()
+}
+
 function shouldPoll(state: TriageState, pipelineComplete: boolean, missCount: number): boolean {
   if (state === 'ANALYZING') return true
   if (state === 'NOT_STARTED' && pipelineComplete && missCount < 4) return true
@@ -72,16 +131,24 @@ function notStartedCopy(
   failedStep?: string | null,
 ): string {
   if (!pipelineComplete) {
-    return 'Waiting for the GitHub Actions run to finish. Triage is ingested after the pipeline completes.'
+    return 'Waiting for the GitHub Actions run to finish. Triage starts after the pipeline completes.'
   }
   if (pipelineConclusion === 'success') {
-    return 'This GitHub run succeeded, so there is no failure classification to show.'
+    return 'This GitHub run succeeded, so there is no failure report to show.'
   }
   const where = [failedJob, failedStep].filter(Boolean).join(' / ')
   if (where) {
-    return `Failed at ${where}. No classification is stored for this run ID yet.`
+    return `Failed at ${where}. No classification is available for this run ID yet.`
   }
-  return 'This GitHub run failed, but no classification is stored for this run ID yet.'
+  return 'This GitHub run failed, but no classification is available for this run ID yet.'
+}
+
+function countByClass(tests: FailedTestTriage[]): Array<{ key: string; count: number }> {
+  const counts = new Map<string, number>()
+  for (const test of tests) {
+    counts.set(test.classification, (counts.get(test.classification) || 0) + 1)
+  }
+  return [...counts.entries()].map(([key, count]) => ({ key, count }))
 }
 
 export default function TriagePanel({
@@ -147,13 +214,19 @@ export default function TriagePanel({
   }, [state, pipelineComplete, error, load, result?.updatedAt, missCount])
 
   const showFullResult = state === 'COMPLETED' || state === 'REVIEW_REQUIRED'
+  const tests = result?.failedTests || []
   const evidence = evidenceItems(result?.evidence)
+  const summary = result?.executiveSummary || result?.probableCause
+  const modeLabel = result?.analysisMode === 'AI_ASSISTED' ? 'AI assisted' : 'Deterministic'
 
   return (
     <div className="triage-panel">
       <div className="triage-header">
-        <strong>Classification</strong>
-        <span className={stateClass(state)}>{state.replaceAll('_', ' ')}</span>
+        <strong>Failure report</strong>
+        <span className="triage-header-meta">
+          {result?.analysisMode ? <span className="triage-mode">{modeLabel}</span> : null}
+          <span className={stateClass(state)}>{state.replaceAll('_', ' ')}</span>
+        </span>
       </div>
       {githubRunUrl ? (
         <p className="meta">
@@ -175,10 +248,14 @@ export default function TriagePanel({
         </div>
       ) : null}
 
-      {!error && state === 'NOT_STARTED' ? (
+      {!error && loading && !showFullResult ? (
+        <p className="meta triage-analyzing">Reading failed tests and writing the report…</p>
+      ) : null}
+
+      {!error && !loading && state === 'NOT_STARTED' ? (
         <p className="meta">
           {notStartedCopy(pipelineComplete, pipelineConclusion, githubFailedJob, githubFailedStep)}
-          {loading && missCount < 4 ? ' Checking again…' : ''}
+          {missCount < 4 ? ' Checking again…' : ''}
         </p>
       ) : null}
 
@@ -204,73 +281,111 @@ export default function TriagePanel({
       {showFullResult && result ? (
         <div className="triage-result">
           {state === 'REVIEW_REQUIRED' || result.humanReviewRequired ? (
-            <div className="triage-review">Human review required</div>
+            <div className="triage-review">Human review required — treat these as separate findings</div>
           ) : null}
-          <div className="triage-grid">
-            <div className="triage-field">
-              <div className="label">Classification</div>
-              <div>{result.classification || '—'}</div>
+
+          <div className="triage-summary-card">
+            <div className="triage-summary-kicker">
+              {tests.length > 0
+                ? `${tests.length} failed test${tests.length === 1 ? '' : 's'}`
+                : 'Pipeline failure'}
             </div>
-            <div className="triage-field">
-              <div className="label">Subtype</div>
-              <div>{result.subtype || '—'}</div>
-            </div>
-            <div className="triage-field">
-              <div className="label">Confidence</div>
-              <div>{result.confidence == null ? '—' : `${result.confidence}%`}</div>
-            </div>
-            <div className="triage-field">
-              <div className="label">Analysis mode</div>
-              <div>{result.analysisMode || '—'}</div>
-            </div>
-            <div className="triage-field">
-              <div>Human Review Required: {result.humanReviewRequired ? 'Yes' : 'No'}</div>
-            </div>
-            <div className="triage-field">
-              <div className="label">Pipeline</div>
-              <div>
-                {result.pipelineName || '—'}
-                {result.pipelineStatus ? ` · ${result.pipelineStatus}` : ''}
-              </div>
-            </div>
-            <div className="triage-field">
-              <div className="label">Failed job / step</div>
-              <div>
-                {result.failedJob || '—'}
-                {result.failedStep ? ` / ${result.failedStep}` : ''}
-              </div>
-            </div>
-          </div>
-          <div className="triage-block">
-            <div className="label">Probable cause</div>
-            <p>{result.probableCause || '—'}</p>
-          </div>
-          {result.relatedFailures && result.relatedFailures.length > 0 ? (
-            <div className="triage-block">
-              <div className="label">Related failures</div>
-              <ul className="triage-evidence">
-                {result.relatedFailures.map((item) => (
-                  <li key={item}>{item}</li>
+            <p className="triage-summary-text">{summary || '—'}</p>
+            {tests.length > 0 ? (
+              <div className="triage-pills">
+                {countByClass(tests).map((item) => (
+                  <span key={item.key} className={`triage-pill ${classTone(item.key)}`}>
+                    {item.count} {prettyClass(item.key).toLowerCase()}
+                  </span>
                 ))}
-              </ul>
-            </div>
-          ) : null}
-          <div className="triage-block">
-            <div className="label">Evidence</div>
-            {evidence.length > 0 ? (
-              <ul className="triage-evidence">
-                {evidence.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
+              </div>
             ) : (
-              <p className="meta">—</p>
+              <div className="triage-pills">
+                <span className={`triage-pill ${classTone(result.classification)}`}>
+                  {prettyClass(result.classification)}
+                  {prettySubtype(result.subtype) ? ` · ${prettySubtype(result.subtype)}` : ''}
+                </span>
+              </div>
             )}
           </div>
-          <div className="triage-block">
-            <div className="label">Recommended action</div>
-            <p>{result.recommendedAction || '—'}</p>
+
+          <div className="triage-meta-row">
+            <span>{result.pipelineName || 'Pipeline'}{result.pipelineStatus ? ` · ${result.pipelineStatus}` : ''}</span>
+            <span>
+              {result.failedJob || 'Unknown job'}
+              {result.failedStep ? ` / ${result.failedStep}` : ''}
+            </span>
+            <span>{result.confidence == null ? 'Confidence —' : `${result.confidence}% confidence`}</span>
           </div>
+
+          {tests.length > 0 ? (
+            <ol className="triage-test-list">
+              {tests.map((test, index) => (
+                <li key={test.fullName || `${test.title}-${index}`} className={`triage-test-card ${classTone(test.classification)}`}>
+                  <div className="triage-test-top">
+                    <span className="triage-test-index">Test {index + 1}</span>
+                    <span className={`triage-pill ${classTone(test.classification)}`}>
+                      {prettyClass(test.classification)}
+                      {prettySubtype(test.subtype) ? ` · ${prettySubtype(test.subtype)}` : ''}
+                    </span>
+                    {test.owner ? <span className="triage-owner">Owner: {test.owner}</span> : null}
+                  </div>
+                  <h3 className="triage-test-title">{test.title}</h3>
+                  {test.file ? <p className="meta triage-test-file">{test.file}</p> : null}
+                  <div className="triage-test-body">
+                    <div>
+                      <div className="label">What happened</div>
+                      <p>{test.whatHappened}</p>
+                    </div>
+                    <div>
+                      <div className="label">Why it failed</div>
+                      <p>{test.whyItFailed}</p>
+                    </div>
+                    <div>
+                      <div className="label">What to do next</div>
+                      <p>{test.recommendedAction}</p>
+                    </div>
+                  </div>
+                  {(test.evidence && test.evidence.length > 0) || test.errorExcerpt ? (
+                    <details className="triage-evidence-details">
+                      <summary>Technical evidence</summary>
+                      <ul className="triage-evidence">
+                        {(test.evidence && test.evidence.length > 0 ? test.evidence : [test.errorExcerpt || '']).map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    </details>
+                  ) : null}
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <>
+              <div className="triage-block">
+                <div className="label">Recommended action</div>
+                <p>{result.recommendedAction || '—'}</p>
+              </div>
+              <div className="triage-block">
+                <div className="label">Evidence</div>
+                {evidence.length > 0 ? (
+                  <ul className="triage-evidence">
+                    {evidence.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="meta">—</p>
+                )}
+              </div>
+            </>
+          )}
+
+          {tests.length > 0 && result.recommendedAction ? (
+            <div className="triage-block">
+              <div className="label">Overall next step</div>
+              <p>{result.recommendedAction}</p>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

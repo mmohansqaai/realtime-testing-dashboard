@@ -162,6 +162,23 @@ class AnalysisMode(str, Enum):
     AI_ASSISTED = 'AI_ASSISTED'
 
 
+class FailedTestTriage(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, alias_generator=to_camel)
+
+    title: str
+    full_name: str
+    file: Optional[str] = None
+    classification: TriageClassification
+    subtype: str
+    confidence: int = Field(ge=0, le=100)
+    what_happened: str
+    why_it_failed: str
+    recommended_action: str
+    owner: Optional[str] = None
+    evidence: list[str] = Field(default_factory=list)
+    error_excerpt: Optional[str] = None
+
+
 class TriageResultWrite(BaseModel):
     """Inbound TriageResult from the CI Failure Triage platform (camelCase JSON)."""
 
@@ -184,6 +201,8 @@ class TriageResultWrite(BaseModel):
     human_review_required: Optional[bool] = None
     analysis_mode: Optional[AnalysisMode] = None
     related_failures: Optional[list[str]] = None
+    failed_tests: Optional[list[FailedTestTriage]] = None
+    executive_summary: Optional[str] = None
 
     @field_validator('provider', 'repository', mode='before')
     @classmethod

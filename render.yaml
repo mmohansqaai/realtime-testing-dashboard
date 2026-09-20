@@ -26,3 +26,9 @@ services:
         value: playwright.yml
       - key: GITHUB_CI_DEFAULT_REF
         value: main
+      - key: AI_ENABLED
+        value: "true"
+      - key: AI_MODEL
+        value: gpt-4o-mini
+      - key: AI_API_KEY
+        sync: false
