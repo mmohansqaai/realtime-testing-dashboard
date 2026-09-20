@@ -438,8 +438,30 @@ code {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 10px;
+  gap: 12px;
+  margin-bottom: 0;
   font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+}
+
+.ci-job-title::-webkit-details-marker {
+  display: none;
+}
+
+.ci-job-title::before {
+  content: '▸';
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.ci-job[open] > .ci-job-title::before {
+  content: '▾';
+}
+
+.ci-job[open] > .ci-job-title {
+  margin-bottom: 10px;
 }
 
 .ci-steps {
@@ -473,6 +495,7 @@ code {
 }
 
 .ci-job-status.running { color: var(--warning); }
+.ci-job-status.failed { color: var(--danger); }
 
 .triage-panel {
   margin-top: 8px;

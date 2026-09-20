@@ -111,6 +111,18 @@ function stepClass(step: CiStep): string {
   return 'ci-step'
 }
 
+function jobShouldStartOpen(job: CiJob): boolean {
+  return job.status === 'in_progress' || job.conclusion === 'failure' || job.conclusion === 'cancelled'
+}
+
+function jobStepSummary(job: CiJob): string {
+  const total = job.steps.length
+  const failed = job.steps.filter((step) => step.conclusion === 'failure').length
+  if (!total) return job.status === 'in_progress' ? 'Running…' : 'No steps yet'
+  if (failed) return `${failed} failed · ${total} steps`
+  return `${total} steps`
+}
+
 function parseGithubRunId(raw: string): number | null {
   const trimmed = raw.trim()
   if (!/^\d+$/.test(trimmed)) return null
@@ -447,13 +459,15 @@ export default function CiPipelinePanel({
             ) : null}
           </div>
           {flow.jobs.map((job) => (
-            <div key={job.id} className="ci-job">
-              <div className="ci-job-title">
+            <details key={job.id} className="ci-job" defaultOpen={jobShouldStartOpen(job)}>
+              <summary className="ci-job-title">
                 <span>{job.name}</span>
-                <span className={`ci-job-status ${job.status === 'in_progress' ? 'running' : ''}`}>
+                <span className={`ci-job-status ${job.status === 'in_progress' ? 'running' : job.conclusion === 'failure' ? 'failed' : ''}`}>
                   {job.status === 'in_progress' ? 'Running…' : job.status}
+                  {' · '}
+                  {jobStepSummary(job)}
                 </span>
-              </div>
+              </summary>
               <ul className="ci-steps">
                 {job.steps.map((step) => (
                   <li key={`${job.id}-${step.number}`} className={stepClass(step)}>
@@ -463,7 +477,7 @@ export default function CiPipelinePanel({
                   </li>
                 ))}
               </ul>
-            </div>
+            </details>
           ))}
         </div>
       ) : null}

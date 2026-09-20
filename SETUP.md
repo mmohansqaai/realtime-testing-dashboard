@@ -5,7 +5,7 @@ Use these remotes (not stale `mmohan-bayone` clones).
 
 | System | GitHub (latest) | Latest branch | Deployed |
 |---|---|---|---|
-| **Retail website** | https://github.com/mmohansqaai/RetailWebsite | `main` | https://retail-website-two.vercel.app |
+| **Retail website** | https://github.com/mmohansqaai/RetailWebsite | `main` | https://retail-website-fawn.vercel.app (BayOne Retail demo) |
 | **Self-healing Playwright** | https://github.com/mmohansqaai/SelfHealingPlaywrightFramework | `main` | GitHub Actions: [Playwright Tests](https://github.com/mmohansqaai/SelfHealingPlaywrightFramework/actions/workflows/playwright.yml) |
 | **Testing + Triage dashboard** | https://github.com/mmohansqaai/realtime-testing-dashboard | `unified-testing-triage-dashboard` | UI: https://realtime-unified-dashboard.vercel.app · API: https://realtime-unified-dashboard-api.onrender.com |
 | **CI Failure Triage engine** | https://github.com/mmohansqaai/ci-failure-triage | `phase-1-github-connector` | No public web deploy (CLI / GitHub repo only). Default branch on GitHub is still `main`. |
@@ -28,7 +28,7 @@ realtime-testing-dashboard
 
 Playwright CI currently uses:
 
-- `BASE_URL=https://retail-website-two.vercel.app`
+- `BASE_URL=https://retail-website-fawn.vercel.app`
 - `DASHBOARD_URL=https://realtime-testing-dashboard-api.onrender.com` (legacy ingest host in `playwright.yml`)
 
 Unified dashboard (shared with management):
