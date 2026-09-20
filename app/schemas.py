@@ -183,6 +183,7 @@ class TriageResultWrite(BaseModel):
     recommended_action: Optional[str] = None
     human_review_required: Optional[bool] = None
     analysis_mode: Optional[AnalysisMode] = None
+    related_failures: Optional[list[str]] = None
 
     @field_validator('provider', 'repository', mode='before')
     @classmethod

@@ -236,6 +236,7 @@ def get_summary(db: Session):
 
 def upsert_triage_result(db: Session, payload) -> TriageResult:
     values = payload.model_dump()
+    values.pop('related_failures', None)
     now = datetime.utcnow()
     row = (
         db.query(TriageResult)

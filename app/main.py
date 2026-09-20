@@ -324,13 +324,13 @@ async def fetch_triage_result(
     run_id: str = Query(..., alias='runId', min_length=1),
     db: Session = Depends(get_db),
 ):
-    row = repository.get_triage_result(db, provider=provider, repository=ci_repository, run_id=run_id)
-    if row:
-        return row
     if provider.strip().lower() in {'github-actions', 'github'}:
         derived = await github_triage.derive_github_triage(ci_repository, run_id)
         if derived:
             return derived
+    row = repository.get_triage_result(db, provider=provider, repository=ci_repository, run_id=run_id)
+    if row:
+        return row
     raise HTTPException(status_code=404, detail='Triage result not found')
 
 

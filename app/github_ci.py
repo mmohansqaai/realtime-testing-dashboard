@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import time
+import zipfile
 from typing import Any, Optional
 
 import httpx
@@ -225,6 +227,77 @@ async def get_run_flow(run_id: int) -> dict[str, Any]:
     ttl = 600 if flow.get('status') in {'completed', 'cancelled'} else 8
     _cache_set(cache_key, flow, ttl)
     return flow
+
+
+MAX_JOB_LOG_CHARS = 1_500_000
+
+
+def decode_job_logs(content: bytes) -> str:
+    """GitHub job logs are a ZIP archive after redirect; keep the trailing slice where failures land."""
+    if not content:
+        return ''
+    text = ''
+    if content.startswith(b'PK'):
+        try:
+            with zipfile.ZipFile(io.BytesIO(content)) as archive:
+                parts: list[str] = []
+                for name in archive.namelist():
+                    if name.endswith('/'):
+                        continue
+                    parts.append(archive.read(name).decode('utf-8', errors='replace'))
+                text = '\n'.join(parts)
+        except zipfile.BadZipFile:
+            text = content.decode('utf-8', errors='replace')
+    else:
+        text = content.decode('utf-8', errors='replace')
+    if len(text) > MAX_JOB_LOG_CHARS:
+        return text[-MAX_JOB_LOG_CHARS:]
+    return text
+
+
+async def get_job_logs(job_id: int) -> str:
+    cache_key = f'job-logs:{job_id}'
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+    token, repo, _ = _require_ci()
+    url = f'https://api.github.com/repos/{repo}/actions/jobs/{job_id}/logs'
+    async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
+        response = await client.get(
+            url,
+            headers={
+                'Authorization': f'Bearer {token}',
+                'Accept': '*/*',
+                'User-Agent': 'realtime-testing-dashboard',
+                'X-GitHub-Api-Version': '2022-11-28',
+            },
+        )
+    if response.status_code == 404:
+        _cache_set(cache_key, '', 120)
+        return ''
+    if response.status_code >= 400:
+        raise GitHubCiError(
+            f'GitHub API {response.status_code} fetching job logs: {response.text[:300]}',
+            status_code=response.status_code,
+        )
+    text = decode_job_logs(response.content or b'')
+    _cache_set(cache_key, text, 600)
+    return text
+
+
+async def get_failed_job_logs(flow: dict[str, Any]) -> str:
+    chunks: list[str] = []
+    for job in flow.get('jobs') or []:
+        if str(job.get('conclusion') or '').lower() != 'failure':
+            continue
+        job_id = job.get('id')
+        if not job_id:
+            continue
+        try:
+            chunks.append(await get_job_logs(int(job_id)))
+        except GitHubCiError:
+            continue
+    return '\n'.join(chunks)
 
 
 def _map_run_summary(run: dict[str, Any]) -> dict[str, Any]:

@@ -26,6 +26,7 @@ export type TriageResult = {
   recommendedAction?: string | null
   humanReviewRequired?: boolean | null
   analysisMode?: string | null
+  relatedFailures?: string[] | null
   createdAt: string
   updatedAt: string
 }
@@ -105,7 +106,7 @@ export default function TriagePanel({
     setLoading(true)
     try {
       const params = new URLSearchParams({ provider, repository, runId })
-      const data = await fetchJsonOr404<TriageResult>(`/api/triage/result?${params.toString()}`, 25000)
+      const data = await fetchJsonOr404<TriageResult>(`/api/triage/result?${params.toString()}`, 90000)
       if (generation !== generationRef.current) return
       setError(null)
       if (!data) {
@@ -244,6 +245,16 @@ export default function TriagePanel({
             <div className="label">Probable cause</div>
             <p>{result.probableCause || '—'}</p>
           </div>
+          {result.relatedFailures && result.relatedFailures.length > 0 ? (
+            <div className="triage-block">
+              <div className="label">Related failures</div>
+              <ul className="triage-evidence">
+                {result.relatedFailures.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           <div className="triage-block">
             <div className="label">Evidence</div>
             {evidence.length > 0 ? (
