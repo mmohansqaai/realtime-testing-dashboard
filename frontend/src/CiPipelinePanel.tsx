@@ -131,6 +131,35 @@ function parseGithubRunId(raw: string): number | null {
   return value
 }
 
+function CiJobBlock({ job }: { job: CiJob }) {
+  const [open, setOpen] = useState(() => jobShouldStartOpen(job))
+  return (
+    <details
+      className="ci-job"
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary className="ci-job-title">
+        <span>{job.name}</span>
+        <span className={`ci-job-status ${job.status === 'in_progress' ? 'running' : job.conclusion === 'failure' ? 'failed' : ''}`}>
+          {job.status === 'in_progress' ? 'Running…' : job.status}
+          {' · '}
+          {jobStepSummary(job)}
+        </span>
+      </summary>
+      <ul className="ci-steps">
+        {job.steps.map((step) => (
+          <li key={`${job.id}-${step.number}`} className={stepClass(step)}>
+            <span>{stepIcon(step)}</span>{' '}
+            {step.name || `Step ${step.number}`}
+            {step.status === 'in_progress' ? ' — running' : ''}
+          </li>
+        ))}
+      </ul>
+    </details>
+  )
+}
+
 export default function CiPipelinePanel({
   onPipelineFinished,
   selectedRunId = null,
@@ -459,25 +488,7 @@ export default function CiPipelinePanel({
             ) : null}
           </div>
           {flow.jobs.map((job) => (
-            <details key={job.id} className="ci-job" defaultOpen={jobShouldStartOpen(job)}>
-              <summary className="ci-job-title">
-                <span>{job.name}</span>
-                <span className={`ci-job-status ${job.status === 'in_progress' ? 'running' : job.conclusion === 'failure' ? 'failed' : ''}`}>
-                  {job.status === 'in_progress' ? 'Running…' : job.status}
-                  {' · '}
-                  {jobStepSummary(job)}
-                </span>
-              </summary>
-              <ul className="ci-steps">
-                {job.steps.map((step) => (
-                  <li key={`${job.id}-${step.number}`} className={stepClass(step)}>
-                    <span>{stepIcon(step)}</span>{' '}
-                    {step.name || `Step ${step.number}`}
-                    {step.status === 'in_progress' ? ' — running' : ''}
-                  </li>
-                ))}
-              </ul>
-            </details>
+            <CiJobBlock key={job.id} job={job} />
           ))}
         </div>
       ) : null}
